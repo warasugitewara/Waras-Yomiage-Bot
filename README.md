@@ -18,56 +18,112 @@ VOICEVOX を使ったローカル完結型 Discord 読み上げBot。
 
 ---
 
-## セットアップ
+## 🖥️ Proxmox LXC 環境構築（完全手順）
 
-### 1. VOICEVOX ENGINE の起動
+### コンテナ作成（Proxmox Web UI）
 
-VOICEVOX ENGINE はGUIなしで動作するサーバーです。  
-[Releases](https://github.com/VOICEVOX/voicevox_engine/releases) から `voicevox_engine_linux-cpu-*.tar.gz`（CPUのみの場合）をダウンロードして展開します。
+#### 推奨リソース
 
-```bash
-# 展開後のディレクトリで
-./voicevox_engine --host 127.0.0.1 --port 50021
-```
+| 項目 | 推奨値 | 最小値 | 備考 |
+|---|---|---|---|
+| CPU | 2 vCPU | 1 vCPU | VOICEVOX 合成は CPU 負荷が高め。1コアだと合成に時間がかかる場合がある |
+| RAM | 2048 MB | 1024 MB | ENGINE 起動時ピーク ~800MB + Python Bot ~150MB + OS |
+| Swap | 512 MB | 0 MB | モデル読み込み時のバッファとして推奨 |
+| Disk | 10 GB | 6 GB | OS ~3GB・ENGINE ~2GB・ログ/余裕分 |
+| ネットワーク | bridge (vmbr0) | — | Discord への外部通信が必須 |
+| 回線速度（上り） | 1 Mbps (0.125 MB/s) 以上 | 0.5 Mbps | Discord 音声は Opus 64kbps ≈ 0.008 MB/s。余裕を持って 1 Mbps 推奨 |
+| 回線速度（下り） | 1 Mbps (0.125 MB/s) 以上 | 0.5 Mbps | API・WebSocket 通信のみ。帯域はほぼ消費しない |
 
-systemd で自動起動する場合は後述の「systemd 設定」を参照してください。
+#### 手順
+
+1. Proxmox Web UI → **ノード** → **local（またはストレージ）** → **CT Templates**  
+   「Templates」ボタン → `debian-13-standard` を検索して **Download**
+2. **Create CT** をクリックし、以下を設定：
+
+   | タブ | 設定項目 | 値 |
+   |---|---|---|
+   | General | Hostname | `yomiage-bot`（任意） |
+   | General | Password | root パスワード |
+   | General | Unprivileged container | ✅ ON |
+   | Template | Template | `debian-13-standard_*.tar.zst` |
+   | Disks | Disk size | `10` GB |
+   | CPU | Cores | `2` |
+   | Memory | Memory | `2048` MB |
+   | Memory | Swap | `512` MB |
+   | Network | IPv4 | DHCP または固定IP |
+   | DNS | DNS | デフォルトのまま |
+
+3. **Finish** → コンテナを選択して **Start**
 
 ---
 
-### 2. FFmpeg のインストール（Debian）
+### コンテナ内セットアップ
+
+Proxmox の **Console** タブ、または SSH (`ssh root@<コンテナIP>`) で接続して作業します。
+
+#### 1. システム更新 & 必須ツール導入
 
 ```bash
-apt update && apt install -y ffmpeg
+apt update && apt upgrade -y
+apt install -y curl wget git unzip ffmpeg python3 python3-pip python3-venv nano
 ```
 
----
-
-### 3. Bot のセットアップ
+#### 2. Python バージョン確認
 
 ```bash
-# リポジトリをクローン
+python3 --version
+# Python 3.11.x 以上であることを確認
+```
+
+#### 3. VOICEVOX ENGINE のインストール
+
+CPU 版（GPU なし）のヘッドレスエンジンを使います。
+
+```bash
+mkdir -p /opt && cd /opt
+
+# リリースページから最新の linux-cpu.zip を確認してダウンロード
+# https://github.com/VOICEVOX/voicevox_engine/releases
+curl -L -o voicevox_engine.zip \
+  https://github.com/VOICEVOX/voicevox_engine/releases/latest/download/linux-cpu.zip
+
+unzip voicevox_engine.zip -d voicevox_engine
+chmod +x /opt/voicevox_engine/run
+
+# 動作テスト（起動後 Ctrl+C で停止）
+/opt/voicevox_engine/run --host 127.0.0.1 --port 50021
+# → "Application startup complete." が出れば OK
+```
+
+> ⚠️ ダウンロードURLはバージョンにより変わることがあります。  
+> うまくいかない場合は [GitHub Releases](https://github.com/VOICEVOX/voicevox_engine/releases) から `linux-cpu.zip` の URL を直接コピーしてください。
+
+#### 4. Bot のセットアップ
+
+```bash
+cd /opt
 git clone https://github.com/warasugitewara/Waras-Yomiage-Bot.git
 cd Waras-Yomiage-Bot
 
-# 依存パッケージをインストール
+# 仮想環境を作成して依存パッケージをインストール
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
-# .env を作成
+# 設定ファイルを作成
 cp .env.example .env
-# .env を編集して DISCORD_TOKEN を設定
+nano .env
 ```
 
----
-
-### 4. `.env` の設定
+#### 5. `.env` の設定
 
 ```env
-DISCORD_TOKEN=your_token_here       # Discord Bot Token（必須）
-VOICEVOX_URL=http://localhost:50021 # VOICEVOX ENGINE の URL
-PREFIX=!y                           # コマンドプレフィックス
-DEFAULT_SPEAKER=3                   # スピーカーID（3 = ずんだもん ノーマル）
-DEFAULT_SPEED=1.0                   # 読み上げ速度（0.5〜2.0）
-MAX_TEXT_LENGTH=100                 # 最大読み上げ文字数
+DISCORD_TOKEN=your_token_here        # Discord Bot Token（必須）
+VOICEVOX_URL=http://localhost:50021  # VOICEVOX ENGINE の URL
+PREFIX=!                             # コマンドプレフィックス
+DEFAULT_SPEAKER=3                    # スピーカーID（3 = ずんだもん ノーマル）
+DEFAULT_SPEED=1.0                    # 読み上げ速度（0.5〜2.0）
+MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 ```
 
 主要なスピーカーID例：
@@ -79,13 +135,98 @@ MAX_TEXT_LENGTH=100                 # 最大読み上げ文字数
 | 2 | 四国めたん | あまあま |
 | 8 | 春日部つむぎ | ノーマル |
 
-全スピーカー一覧は `http://localhost:50021/speakers` で確認できます。
+全スピーカー一覧は起動後に `http://<コンテナIP>:50021/speakers` または `/myvoice list` で確認できます。
+
+#### 6. systemd サービスの登録
+
+```bash
+# VOICEVOX ENGINE サービス
+cat > /etc/systemd/system/voicevox.service << 'EOF'
+[Unit]
+Description=VOICEVOX ENGINE
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/voicevox_engine
+ExecStart=/opt/voicevox_engine/run --host 127.0.0.1 --port 50021
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Yomiage Bot サービス
+cat > /etc/systemd/system/yomiage-bot.service << 'EOF'
+[Unit]
+Description=Waras Yomiage Bot
+After=voicevox.service
+Requires=voicevox.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/Waras-Yomiage-Bot
+ExecStart=/opt/Waras-Yomiage-Bot/.venv/bin/python bot.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 有効化して起動
+systemctl daemon-reload
+systemctl enable --now voicevox
+systemctl enable --now yomiage-bot
+```
+
+#### 7. 動作確認
+
+```bash
+# サービス状態の確認
+systemctl status voicevox
+systemctl status yomiage-bot
+
+# リアルタイムログ
+journalctl -u yomiage-bot -f
+
+# VOICEVOX ENGINE が応答するか確認
+curl http://localhost:50021/version
+```
 
 ---
 
-### 5. Bot の起動
+## セットアップ（ローカル・その他環境）
+
+### 1. VOICEVOX ENGINE の起動
+
+VOICEVOX ENGINE はGUIなしで動作するサーバーです。  
+[Releases](https://github.com/VOICEVOX/voicevox_engine/releases) から `linux-cpu.zip`（CPUのみの場合）をダウンロードして展開します。
 
 ```bash
+./run --host 127.0.0.1 --port 50021
+```
+
+---
+
+### 2. Bot のセットアップ
+
+```bash
+git clone https://github.com/warasugitewara/Waras-Yomiage-Bot.git
+cd Waras-Yomiage-Bot
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# .env を編集して DISCORD_TOKEN を設定
+```
+
+---
+
+### 3. Bot の起動
+
+```bash
+source .venv/bin/activate
 python bot.py
 ```
 
