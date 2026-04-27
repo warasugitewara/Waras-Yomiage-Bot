@@ -51,11 +51,16 @@ class TTS(commands.Cog):
         # guild_id → (synthesizer_task, player_task)
         self._workers: dict[int, tuple[asyncio.Task | None, asyncio.Task | None]] = {}
 
+        # guild_id → auto-leave task（誰もいなくなったら5秒後に退出）
+        self._auto_leave_tasks: dict[int, asyncio.Task] = {}
+
     async def cog_unload(self):
         await self.voicevox.close()
         for synth, play in self._workers.values():
             if synth: synth.cancel()
             if play: play.cancel()
+        for task in self._auto_leave_tasks.values():
+            task.cancel()
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -100,6 +105,40 @@ class TTS(commands.Cog):
                         q.task_done()
                     except Exception:
                         pass
+
+    def _cancel_auto_leave(self, guild_id: int):
+        """スケジュール済みの自動退出タスクをキャンセルする"""
+        task = self._auto_leave_tasks.pop(guild_id, None)
+        if task and not task.done():
+            task.cancel()
+
+    def _schedule_auto_leave(self, guild_id: int):
+        """誰もいなくなったら5秒後に自動退出タスクをスケジュールする"""
+        self._cancel_auto_leave(guild_id)
+        self._auto_leave_tasks[guild_id] = asyncio.create_task(
+            self._auto_leave(guild_id), name=f"auto-leave-{guild_id}"
+        )
+
+    async def _auto_leave(self, guild_id: int):
+        """5秒待ってもVC内に人間がいなければ自動退出する"""
+        await asyncio.sleep(5)
+        self._auto_leave_tasks.pop(guild_id, None)
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return
+        vc: discord.VoiceClient | None = guild.voice_client
+        if vc is None:
+            return
+        non_bots = [m for m in vc.channel.members if not m.bot]
+        if non_bots:
+            return
+        self.channel_store.clear(guild_id)
+        self._speed.pop(guild_id, None)
+        self._cancel_workers(guild_id)
+        try:
+            await vc.disconnect()
+        except Exception as e:
+            print(f"[AUTO-LEAVE ERROR] {e}")
 
     async def _synthesizer(self, guild_id: int):
         """メッセージキューからTTSItemを取り出し、合成してWAVキューに積む"""
@@ -247,6 +286,7 @@ class TTS(commands.Cog):
 
         await ctx.defer()
         guild_id = ctx.guild.id
+        self._cancel_auto_leave(guild_id)
         self.channel_store.clear(guild_id)
         self._speed.pop(guild_id, None)
         self._cancel_workers(guild_id)
@@ -535,9 +575,13 @@ class TTS(commands.Cog):
         name = member.display_name
 
         if before.channel != bot_channel and after.channel == bot_channel:
+            self._cancel_auto_leave(guild.id)
             self._enqueue_announce(guild.id, f"{name}さんが入室しました")
         elif before.channel == bot_channel and after.channel != bot_channel:
             self._enqueue_announce(guild.id, f"{name}さんが退室しました")
+            non_bots = [m for m in bot_channel.members if not m.bot]
+            if not non_bots:
+                self._schedule_auto_leave(guild.id)
 
     # ------------------------------------------------------------------ #
     # Message event
