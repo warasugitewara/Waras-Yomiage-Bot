@@ -40,8 +40,14 @@ def filter_message(
     text = _EMOJI_RE.sub(lambda m: m.group(0).split(":")[1], text)
 
     # 読み替え辞書を適用（大文字小文字区別なし）
+    # ASCII のみの単語は \b で単語境界を付けて部分一致を防ぐ
     for word, reading in word_dict.items():
-        text = re.sub(re.escape(word), reading, text, flags=re.IGNORECASE)
+        pat = (
+            rf"\b{re.escape(word)}\b"
+            if re.fullmatch(r"[a-zA-Z0-9]+", word)
+            else re.escape(word)
+        )
+        text = re.sub(pat, reading, text, flags=re.IGNORECASE)
 
     # 連続空白を整理
     text = _WHITESPACE_RE.sub(" ", text).strip()
