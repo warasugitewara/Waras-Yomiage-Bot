@@ -108,7 +108,8 @@ chmod +x /opt/voicevox_engine/linux-cpu-x64/run
 cd /opt && rm -rf /opt/voicevox_dl
 
 # 動作テスト（起動後 Ctrl+C で停止）
-/opt/voicevox_engine/linux-cpu-x64/run --host 127.0.0.1 --port 50021
+cd /opt/voicevox_engine/linux-cpu-x64
+./run --host 127.0.0.1 --port 50021
 # → "Application startup complete." が出れば OK
 ```
 
