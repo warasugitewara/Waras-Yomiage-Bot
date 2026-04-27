@@ -39,19 +39,23 @@ class TTS(commands.Cog):
 
         self.user_voice = UserVoiceStore(default_speaker=self.default_speaker)
 
-        # guild_id → speed(float)  ※スピーカーはユーザー個別管理
+        # guild_id → speed(float)
         self._speed: dict[int, float] = {}
 
-        # guild_id → asyncio.Queue[TTSItem]
+        # guild_id → asyncio.Queue[TTSItem]  (メッセージキュー)
         self._queues: dict[int, asyncio.Queue] = {}
 
-        # guild_id → asyncio.Task (worker)
-        self._workers: dict[int, asyncio.Task] = {}
+        # guild_id → asyncio.Queue[io.BytesIO]  (合成済みWAVキュー、最大2件先読み)
+        self._wav_queues: dict[int, asyncio.Queue] = {}
+
+        # guild_id → (synthesizer_task, player_task)
+        self._workers: dict[int, tuple[asyncio.Task | None, asyncio.Task | None]] = {}
 
     async def cog_unload(self):
         await self.voicevox.close()
-        for task in self._workers.values():
-            task.cancel()
+        for synth, play in self._workers.values():
+            if synth: synth.cancel()
+            if play: play.cancel()
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -65,41 +69,81 @@ class TTS(commands.Cog):
             self._queues[guild_id] = asyncio.Queue()
         return self._queues[guild_id]
 
-    def _ensure_worker(self, guild_id: int):
-        task = self._workers.get(guild_id)
-        if task is None or task.done():
-            self._workers[guild_id] = asyncio.create_task(
-                self._tts_worker(guild_id), name=f"tts-worker-{guild_id}"
-            )
+    def _get_wav_queue(self, guild_id: int) -> asyncio.Queue:
+        if guild_id not in self._wav_queues:
+            # 最大2件先読みして再生待ちWAVをバッファリング
+            self._wav_queues[guild_id] = asyncio.Queue(maxsize=2)
+        return self._wav_queues[guild_id]
 
-    async def _tts_worker(self, guild_id: int):
-        """キューから TTSItem を取り出して順番に再生するワーカー"""
-        queue = self._get_queue(guild_id)
+    def _ensure_worker(self, guild_id: int):
+        synth, play = self._workers.get(guild_id, (None, None))
+        if synth is None or synth.done():
+            synth = asyncio.create_task(
+                self._synthesizer(guild_id), name=f"synth-{guild_id}"
+            )
+        if play is None or play.done():
+            play = asyncio.create_task(
+                self._player(guild_id), name=f"player-{guild_id}"
+            )
+        self._workers[guild_id] = (synth, play)
+
+    def _cancel_workers(self, guild_id: int):
+        """合成タスクと再生タスクをキャンセルしてキューを空にする"""
+        synth, play = self._workers.pop(guild_id, (None, None))
+        if synth: synth.cancel()
+        if play: play.cancel()
+        for q in (self._queues.pop(guild_id, None), self._wav_queues.pop(guild_id, None)):
+            if q:
+                while not q.empty():
+                    try:
+                        q.get_nowait()
+                        q.task_done()
+                    except Exception:
+                        pass
+
+    async def _synthesizer(self, guild_id: int):
+        """メッセージキューからTTSItemを取り出し、合成してWAVキューに積む"""
+        msg_q = self._get_queue(guild_id)
+        wav_q = self._get_wav_queue(guild_id)
         while True:
-            item: TTSItem = await queue.get()
+            item: TTSItem = await msg_q.get()
             try:
                 guild = self.bot.get_guild(guild_id)
-                if guild is None:
+                if guild is None or guild.voice_client is None:
                     continue
-                vc: discord.VoiceClient | None = guild.voice_client
-                if vc is None or not vc.is_connected():
+                wav = await self.voicevox.synthesis(item.text, item.speaker_id, item.speed)
+                # 合成後に再度VC接続を確認（合成中に切断された場合は破棄）
+                if guild.voice_client is None:
                     continue
-
-                wav: io.BytesIO = await self.voicevox.synthesis(
-                    item.text, item.speaker_id, item.speed
-                )
-
-                event = asyncio.Event()
-                source = discord.FFmpegPCMAudio(wav, pipe=True)
-                vc.play(source, after=lambda _: event.set())
-                await event.wait()
-
+                await wav_q.put(wav)
             except VoicevoxError as e:
                 print(f"[VOICEVOX ERROR] {e}")
             except Exception as e:
-                print(f"[TTS WORKER ERROR] {e}")
+                print(f"[SYNTH ERROR] {e}")
             finally:
-                queue.task_done()
+                msg_q.task_done()
+
+    async def _player(self, guild_id: int):
+        """WAVキューから音声を取り出してVCで再生する"""
+        wav_q = self._get_wav_queue(guild_id)
+        loop = asyncio.get_running_loop()
+        while True:
+            wav: io.BytesIO = await wav_q.get()
+            try:
+                guild = self.bot.get_guild(guild_id)
+                vc: discord.VoiceClient | None = guild.voice_client if guild else None
+                if vc and vc.is_connected():
+                    event = asyncio.Event()
+                    source = discord.FFmpegPCMAudio(wav, pipe=True)
+                    vc.play(
+                        source,
+                        after=lambda err: loop.call_soon_threadsafe(event.set),
+                    )
+                    await event.wait()
+            except Exception as e:
+                print(f"[PLAYER ERROR] {e}")
+            finally:
+                wav_q.task_done()
 
     async def _join_vc(self, voice_channel: discord.VoiceChannel):
         """VCに参加してワーカーを起動する共通処理"""
@@ -115,6 +159,16 @@ class TTS(commands.Cog):
 
         self._ensure_worker(guild_id)
         return vc, True
+
+    def _enqueue_announce(self, guild_id: int, text: str):
+        """システムアナウンスをデフォルトスピーカーでキューに積む"""
+        item = TTSItem(
+            text=text,
+            speaker_id=self.default_speaker,
+            speed=self._guild_speed(guild_id),
+        )
+        self._get_queue(guild_id).put_nowait(item)
+        self._ensure_worker(guild_id)
 
     async def _get_valid_speaker_ids(self) -> set[int] | None:
         """VOICEVOX から有効な speaker_id セットを取得。失敗時は None"""
@@ -178,6 +232,7 @@ class TTS(commands.Cog):
         added = self.channel_store.add(ctx.guild.id, ctx.channel.id)
 
         if joined:
+            self._enqueue_announce(ctx.guild.id, "接続しました")
             await ctx.send(
                 f"✅ `{ctx.author.voice.channel.name}` に参加しました。\n"
                 f"📢 <#{ctx.channel.id}> を読み上げ対象に追加しました。"
@@ -199,16 +254,7 @@ class TTS(commands.Cog):
         guild_id = ctx.guild.id
         self.channel_store.clear(guild_id)
         self._speed.pop(guild_id, None)
-
-        q = self._queues.pop(guild_id, None)
-        if q:
-            while not q.empty():
-                q.get_nowait()
-                q.task_done()
-
-        task = self._workers.pop(guild_id, None)
-        if task:
-            task.cancel()
+        self._cancel_workers(guild_id)
 
         try:
             await vc.disconnect()
@@ -471,6 +517,32 @@ class TTS(commands.Cog):
             lines = "\n".join(f"• `{w}` → `{r}`" for w, r in d.items())
             msg = f"📖 読み替え辞書:\n{lines}"
         await self._send(ctx_or_inter, msg)
+
+    # ------------------------------------------------------------------ #
+    # Voice state event
+    # ------------------------------------------------------------------ #
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
+    ):
+        if member.bot:
+            return
+        guild = member.guild
+        vc: discord.VoiceClient | None = guild.voice_client
+        if vc is None:
+            return
+
+        bot_channel = vc.channel
+        name = member.display_name
+
+        if before.channel != bot_channel and after.channel == bot_channel:
+            self._enqueue_announce(guild.id, f"{name}さんが入室しました")
+        elif before.channel == bot_channel and after.channel != bot_channel:
+            self._enqueue_announce(guild.id, f"{name}さんが退室しました")
 
     # ------------------------------------------------------------------ #
     # Message event

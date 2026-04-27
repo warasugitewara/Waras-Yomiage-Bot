@@ -26,12 +26,12 @@ class VoicevoxClient:
         """テキストを音声合成して WAV の BytesIO を返す"""
         session = await self._get_session()
 
-        # Step 1: audio_query
+        # Step 1: audio_query（ローカルなので短いタイムアウトで十分）
         try:
             async with session.post(
                 f"{self.base_url}/audio_query",
                 params={"text": text, "speaker": speaker},
-                timeout=aiohttp.ClientTimeout(total=10),
+                timeout=aiohttp.ClientTimeout(total=5),
             ) as resp:
                 if resp.status != 200:
                     raise VoicevoxError(f"audio_query failed: {resp.status}")
@@ -47,7 +47,7 @@ class VoicevoxClient:
             f"{self.base_url}/synthesis",
             params={"speaker": speaker},
             json=query,
-            timeout=aiohttp.ClientTimeout(total=30),
+            timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             if resp.status != 200:
                 raise VoicevoxError(f"synthesis failed: {resp.status}")
