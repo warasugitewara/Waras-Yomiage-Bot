@@ -65,7 +65,7 @@ Proxmox の **Console** タブ、または SSH (`ssh root@<コンテナIP>`) で
 
 ```bash
 apt update && apt upgrade -y
-apt install -y curl wget git unzip ffmpeg python3 python3-pip python3-venv nano
+apt install -y curl wget git p7zip-full ffmpeg python3 python3-pip python3-venv nano
 ```
 
 #### 2. Python バージョン確認
@@ -77,26 +77,43 @@ python3 --version
 
 #### 3. VOICEVOX ENGINE のインストール
 
-CPU 版（GPU なし）のヘッドレスエンジンを使います。
+CPU 版（GPU なし）のヘッドレスエンジンを使います。  
+最新版は **7z 分割形式**（`.7z.001`, `.7z.002`, ...）で配布されているため、`p7zip-full` で展開します。
 
 ```bash
-mkdir -p /opt && cd /opt
+mkdir -p /opt/voicevox_dl && cd /opt/voicevox_dl
 
-# リリースページから最新の linux-cpu.zip を確認してダウンロード
-# https://github.com/VOICEVOX/voicevox_engine/releases
-curl -L -o voicevox_engine.zip \
-  https://github.com/VOICEVOX/voicevox_engine/releases/latest/download/linux-cpu.zip
+# バージョンを変数にセット（必要に応じて書き換えてください）
+# 最新版は https://github.com/VOICEVOX/voicevox_engine/releases で確認
+VVOX_VER="0.25.1"
+BASE_URL="https://github.com/VOICEVOX/voicevox_engine/releases/download/${VVOX_VER}/voicevox_engine-linux-cpu-x64-${VVOX_VER}"
 
-unzip voicevox_engine.zip -d voicevox_engine
+# 分割ファイルをすべてダウンロード（存在するパートを順に取得、404 で終了）
+n=1
+while true; do
+  part=$(printf "%03d" $n)
+  echo "Downloading part ${part} ..."
+  curl -f -L -o "voicevox_engine.7z.${part}" "${BASE_URL}.7z.${part}" || break
+  n=$((n + 1))
+done
+
+# 分割 7z を展開（/opt/voicevox_engine に展開される）
+7za x voicevox_engine.7z.001 -o/opt
+
+# 展開先ディレクトリ名をバージョンに関係なく統一
+mv /opt/voicevox_engine-linux-cpu-x64-* /opt/voicevox_engine 2>/dev/null || true
 chmod +x /opt/voicevox_engine/run
+
+# ダウンロード用ディレクトリを削除
+cd /opt && rm -rf /opt/voicevox_dl
 
 # 動作テスト（起動後 Ctrl+C で停止）
 /opt/voicevox_engine/run --host 127.0.0.1 --port 50021
 # → "Application startup complete." が出れば OK
 ```
 
-> ⚠️ ダウンロードURLはバージョンにより変わることがあります。  
-> うまくいかない場合は [GitHub Releases](https://github.com/VOICEVOX/voicevox_engine/releases) から `linux-cpu.zip` の URL を直接コピーしてください。
+> ℹ️ バージョンアップ時は `VVOX_VER` の値を書き換えて同じ手順を実行してください。  
+> リリース一覧: [GitHub Releases](https://github.com/VOICEVOX/voicevox_engine/releases)
 
 #### 4. Bot のセットアップ
 
