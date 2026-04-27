@@ -5,7 +5,7 @@ VOICEVOX を使ったローカル完結型 Discord 読み上げBot。
 **コンセプト: シンプル・高速・直感的・エコ**
 
 外部 TTS サービスに依存せず、VOICEVOX ENGINE をローカルで動かすことでほぼゼロ遅延を実現します。
-
+33
 ---
 
 ## 必要なもの
@@ -426,6 +426,9 @@ systemctl enable --now voicevox yomiage-bot
 ```
 
 ---
+
+### thanks for readimg
+「最近読み上げbotラグいなぁ」そうだ、自分で作れば良いんだ!! という所から始まりました。
 
 ## ライセンス
 
