@@ -64,7 +64,7 @@ cp .env.example .env
 ```env
 DISCORD_TOKEN=your_token_here      # Discord Bot Token（必須）
 VOICEVOX_URL=http://localhost:50021 # VOICEVOX ENGINE の URL
-PREFIX=!                            # コマンドプレフィックス
+PREFIX=!y                           # コマンドプレフィックス
 DEFAULT_SPEAKER=3                   # スピーカーID（3 = ずんだもん ノーマル）
 DEFAULT_SPEED=1.0                   # 読み上げ速度（0.5〜2.0）
 MAX_TEXT_LENGTH=100                 # 最大読み上げ文字数
