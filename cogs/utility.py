@@ -61,17 +61,66 @@ class Utility(commands.Cog):
     async def about(self, ctx: commands.Context):
         await ctx.defer()
         prefix = os.getenv("PREFIX", "!")
+        voicevox_url = os.getenv("VOICEVOX_URL", "http://localhost:50021")
+        default_speaker = os.getenv("DEFAULT_SPEAKER", "3")
+        default_speed = os.getenv("DEFAULT_SPEED", "1.0")
+        max_length = os.getenv("MAX_TEXT_LENGTH", "100")
+
+        # ランタイム情報
+        import platform, sys
+        guild_count = len(self.bot.guilds)
+        user_count = sum(g.member_count or 0 for g in self.bot.guilds)
+        ws_ms = round(self.bot.latency * 1000)
+
         embed = discord.Embed(
             title="🔊 Waras-Yomiage-Bot",
-            description="VOICEVOX を使ったローカル動作の Discord 読み上げBot",
+            description=(
+                "VOICEVOX を使ったローカル完結型 Discord 読み上げBot。\n"
+                "外部サービス不要・低遅延・パイプライン処理で快適な読み上げを実現。"
+            ),
             color=discord.Color.green(),
             url=_REPO_URL,
         )
-        embed.add_field(name="バージョン", value=_VERSION, inline=True)
-        embed.add_field(name="プレフィックス", value=f"`{prefix}`", inline=True)
-        embed.add_field(name="エンジン", value="VOICEVOX ENGINE (ローカル)", inline=True)
-        embed.add_field(name="ソースコード", value=f"[GitHub]({_REPO_URL})", inline=False)
-        embed.set_footer(text="コンセプト: 簡単・低遅延・直感的")
+
+        embed.add_field(name="🏷️ バージョン",    value=_VERSION,                       inline=True)
+        embed.add_field(name="⌨️ プレフィックス", value=f"`{prefix}`",                  inline=True)
+        embed.add_field(name="📡 WebSocket",     value=f"`{ws_ms} ms`",                inline=True)
+
+        embed.add_field(name="🏠 サーバー数",    value=f"`{guild_count}`",              inline=True)
+        embed.add_field(name="👥 ユーザー数",    value=f"`{user_count}`",               inline=True)
+        embed.add_field(name="🐍 Python",        value=f"`{sys.version.split()[0]}`",  inline=True)
+
+        embed.add_field(
+            name="🎤 VOICEVOX ENGINE",
+            value=(
+                f"URL: `{voicevox_url}`\n"
+                f"デフォルトスピーカーID: `{default_speaker}`\n"
+                f"デフォルト速度: `{default_speed}x`\n"
+                f"最大読み上げ文字数: `{max_length}文字`"
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="✨ 主な機能",
+            value=(
+                "• ユーザーごとのボイス設定（40+ キャラクター対応）\n"
+                "• 複数テキストチャンネル同時読み上げ\n"
+                "• 入退室アナウンス\n"
+                "• 読み替え辞書\n"
+                "• パイプライン合成（次メッセージを先読み）\n"
+                "• prefix & slash コマンド両対応"
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="🔗 リンク",
+            value=f"[ソースコード (GitHub)]({_REPO_URL})",
+            inline=False,
+        )
+
+        embed.set_footer(text=f"discord.py {discord.__version__} • {platform.system()} • コンセプト: 簡単・低遅延・直感的・エコ")
         await ctx.send(embed=embed)
 
     # ── help ──────────────────────────────────────────────────────────────
