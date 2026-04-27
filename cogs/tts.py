@@ -124,6 +124,14 @@ class TTS(commands.Cog):
         except VoicevoxError:
             return None
 
+    async def _defer(self, ctx_or_inter, ephemeral: bool = False):
+        """slash/prefix 両対応の defer。prefix では typing を表示するだけ"""
+        if isinstance(ctx_or_inter, discord.Interaction):
+            if not ctx_or_inter.response.is_done():
+                await ctx_or_inter.response.defer(ephemeral=ephemeral)
+        else:
+            await ctx_or_inter.typing()
+
     async def _send(self, ctx_or_inter, msg: str, ephemeral: bool = False):
         """Context / Interaction 両対応の送信ヘルパー"""
         if isinstance(ctx_or_inter, discord.Interaction):
@@ -156,6 +164,8 @@ class TTS(commands.Cog):
             await ctx.send("先にボイスチャンネルに参加してください。", ephemeral=True)
             return
 
+        # VC接続は3秒を超える場合があるため事前に defer
+        await ctx.defer()
         vc, joined = await self._join_vc(ctx.author.voice.channel)
         added = self.channel_store.add(ctx.guild.id, ctx.channel.id)
 
@@ -177,6 +187,7 @@ class TTS(commands.Cog):
             await ctx.send("ボイスチャンネルに接続していません。", ephemeral=True)
             return
 
+        await ctx.defer()
         guild_id = ctx.guild.id
         self.channel_store.clear(guild_id)
         self._speed.pop(guild_id, None)
@@ -226,11 +237,13 @@ class TTS(commands.Cog):
 
     @myvoice_group.command(name="set")
     async def myvoice_set_prefix(self, ctx: commands.Context, speaker_id: int):
+        await ctx.defer()
         await self._myvoice_set(ctx, speaker_id)
 
     @myvoice_app.command(name="set", description="自分の読み上げボイスを設定します")
     @app_commands.describe(speaker_id="VOICEVOX のスピーカーID（/myvoice list で確認）")
     async def myvoice_set_slash(self, inter: discord.Interaction, speaker_id: int):
+        await inter.response.defer(ephemeral=False)
         await self._myvoice_set(inter, speaker_id)
 
     async def _myvoice_set(self, ctx_or_inter, speaker_id: int):
@@ -254,10 +267,12 @@ class TTS(commands.Cog):
 
     @myvoice_group.command(name="reset")
     async def myvoice_reset_prefix(self, ctx: commands.Context):
+        await ctx.defer()
         await self._myvoice_reset(ctx)
 
     @myvoice_app.command(name="reset", description="自分のボイス設定をデフォルト（ずんだもん ノーマル）に戻します")
     async def myvoice_reset_slash(self, inter: discord.Interaction):
+        await inter.response.defer(ephemeral=False)
         await self._myvoice_reset(inter)
 
     async def _myvoice_reset(self, ctx_or_inter):
@@ -273,10 +288,12 @@ class TTS(commands.Cog):
 
     @myvoice_group.command(name="info")
     async def myvoice_info_prefix(self, ctx: commands.Context):
+        await ctx.defer()
         await self._myvoice_info(ctx)
 
     @myvoice_app.command(name="info", description="現在の自分のボイス設定を表示します")
     async def myvoice_info_slash(self, inter: discord.Interaction):
+        await inter.response.defer(ephemeral=True)
         await self._myvoice_info(inter)
 
     async def _myvoice_info(self, ctx_or_inter):
@@ -294,10 +311,12 @@ class TTS(commands.Cog):
 
     @myvoice_group.command(name="list")
     async def myvoice_list_prefix(self, ctx: commands.Context):
+        await ctx.defer()
         await self._myvoice_list(ctx)
 
     @myvoice_app.command(name="list", description="利用可能なスピーカー一覧を表示します")
     async def myvoice_list_slash(self, inter: discord.Interaction):
+        await inter.response.defer(ephemeral=True)
         await self._myvoice_list(inter)
 
     async def _myvoice_list(self, ctx_or_inter):
@@ -330,6 +349,7 @@ class TTS(commands.Cog):
     @commands.hybrid_command(name="voice", description="自分の読み上げボイスを設定します（/myvoice set と同じ）")
     @app_commands.describe(speaker_id="VOICEVOX のスピーカーID（/myvoice list で確認）")
     async def voice(self, ctx: commands.Context, speaker_id: int):
+        await ctx.defer()
         await self._myvoice_set(ctx, speaker_id)
 
     # ------------------------------------------------------------------ #
