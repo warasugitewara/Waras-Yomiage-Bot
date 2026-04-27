@@ -233,15 +233,10 @@ class TTS(commands.Cog):
 
         if joined:
             self._enqueue_announce(ctx.guild.id, "接続しました")
-            await ctx.send(
-                f"✅ `{ctx.author.voice.channel.name}` に参加しました。\n"
-                f"📢 <#{ctx.channel.id}> を読み上げ対象に追加しました。"
-            )
-        else:
-            msg = f"✅ すでに `{vc.channel.name}` にいます。"
-            if added:
-                msg += f"\n📢 <#{ctx.channel.id}> を読み上げ対象に追加しました。"
-            await ctx.send(msg)
+
+        # slash コマンドは defer 後に必ず応答が必要（ユーザーのみ見える）
+        if ctx.interaction:
+            await ctx.send("✅", ephemeral=True)
 
     @commands.hybrid_command(name="leave", description="VCから退出して読み上げを停止します")
     async def leave(self, ctx: commands.Context):
