@@ -473,6 +473,3 @@ class TTS(commands.Cog):
 async def setup(bot: commands.Bot):
     cog = TTS(bot)
     await bot.add_cog(cog)
-    bot.tree.add_command(cog.myvoice_app)
-    bot.tree.add_command(cog.listen_app)
-    bot.tree.add_command(cog.dict_app)
