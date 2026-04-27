@@ -19,11 +19,12 @@ class YomiageBot(commands.Bot):
         super().__init__(
             command_prefix=PREFIX,
             intents=intents,
-            help_command=commands.DefaultHelpCommand(),
+            help_command=None,  # カスタム help コマンドを使用
         )
 
     async def setup_hook(self):
         await self.load_extension("cogs.tts")
+        await self.load_extension("cogs.utility")
         # スラッシュコマンドをグローバル同期
         await self.tree.sync()
         print("[Bot] スラッシュコマンドを同期しました。")

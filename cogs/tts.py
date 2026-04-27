@@ -166,7 +166,15 @@ class TTS(commands.Cog):
 
         # VC接続は3秒を超える場合があるため事前に defer
         await ctx.defer()
-        vc, joined = await self._join_vc(ctx.author.voice.channel)
+        try:
+            vc, joined = await self._join_vc(ctx.author.voice.channel)
+        except discord.ClientException as e:
+            await ctx.send(f"⚠️ VC への接続に失敗しました: {e}")
+            return
+        except Exception as e:
+            await ctx.send(f"⚠️ 予期しないエラーが発生しました: {e}")
+            return
+
         added = self.channel_store.add(ctx.guild.id, ctx.channel.id)
 
         if joined:
@@ -202,7 +210,11 @@ class TTS(commands.Cog):
         if task:
             task.cancel()
 
-        await vc.disconnect()
+        try:
+            await vc.disconnect()
+        except Exception as e:
+            await ctx.send(f"⚠️ 退出時にエラーが発生しました: {e}")
+            return
         await ctx.send("👋 退出しました。")
 
     @commands.hybrid_command(name="skip", description="現在の読み上げをスキップします")
