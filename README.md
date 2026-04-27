@@ -62,7 +62,7 @@ cp .env.example .env
 ### 4. `.env` の設定
 
 ```env
-DISCORD_TOKEN=your_token_here      # Discord Bot Token（必須）
+DISCORD_TOKEN=your_token_here       # Discord Bot Token（必須）
 VOICEVOX_URL=http://localhost:50021 # VOICEVOX ENGINE の URL
 PREFIX=!y                           # コマンドプレフィックス
 DEFAULT_SPEAKER=3                   # スピーカーID（3 = ずんだもん ノーマル）
