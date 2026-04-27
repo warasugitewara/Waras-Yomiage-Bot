@@ -20,8 +20,7 @@ env/
 .env/
 
 # Data (runtime generated)
-data/channels.json
-data/dict.json
+data/*.json
 
 # Logs
 *.log
