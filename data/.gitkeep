@@ -1,0 +1,3 @@
+# data ディレクトリについて
+# channels.json と dict.json は起動時に自動生成されます。
+# これらのファイルは .gitignore で除外されています。
