@@ -75,24 +75,46 @@ class ChannelStore:
 
 
 class WordDict:
-    """読み替え辞書を管理する"""
+    """ギルドごとの読み替え辞書を管理する"""
 
     def __init__(self):
-        self._data: dict[str, str] = _load_json(_DICT_FILE, {})
+        raw = _load_json(_DICT_FILE, {})
+        # guild_id(str) → {word: reading}
+        self._data: dict[int, dict[str, str]] = {
+            int(gid): d for gid, d in raw.items() if isinstance(d, dict)
+        }
 
     def _save(self):
-        _save_json(_DICT_FILE, self._data)
+        _save_json(_DICT_FILE, {str(gid): d for gid, d in self._data.items()})
 
-    def add(self, word: str, reading: str) -> None:
-        self._data[word] = reading
+    def _guild_dict(self, guild_id: int) -> dict[str, str]:
+        return self._data.setdefault(guild_id, {})
+
+    def add(self, guild_id: int, word: str, reading: str) -> None:
+        self._guild_dict(guild_id)[word] = reading
         self._save()
 
-    def remove(self, word: str) -> bool:
-        if word not in self._data:
+    def remove(self, guild_id: int, word: str) -> bool:
+        d = self._data.get(guild_id, {})
+        if word not in d:
             return False
-        del self._data[word]
+        del d[word]
+        if not d:
+            self._data.pop(guild_id, None)
         self._save()
         return True
 
-    def all(self) -> dict[str, str]:
-        return dict(self._data)
+    def all(self, guild_id: int) -> dict[str, str]:
+        return dict(self._data.get(guild_id, {}))
+
+    def import_dict(self, guild_id: int, entries: dict[str, str], replace: bool = False) -> int:
+        """辞書をインポート。replace=True で既存を全置換。追加/更新件数を返す"""
+        if replace:
+            self._data[guild_id] = dict(entries)
+        else:
+            self._guild_dict(guild_id).update(entries)
+        self._save()
+        return len(entries)
+
+    def export_dict(self, guild_id: int) -> dict[str, str]:
+        return dict(self._data.get(guild_id, {}))

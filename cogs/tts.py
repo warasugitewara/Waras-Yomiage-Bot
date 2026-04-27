@@ -514,24 +514,24 @@ class TTS(commands.Cog):
 
     @dict_group.command(name="add")
     async def dict_add_prefix(self, ctx: commands.Context, word: str, reading: str):
-        self.word_dict.add(word, reading)
+        self.word_dict.add(ctx.guild.id, word, reading)
         await ctx.send(f"📖 `{word}` → `{reading}` を辞書に追加しました。")
 
     @dict_app.command(name="add", description="読み替え辞書に単語を追加します")
     @app_commands.describe(word="元の単語", reading="読み替え後のテキスト")
     async def dict_add_slash(self, inter: discord.Interaction, word: str, reading: str):
-        self.word_dict.add(word, reading)
+        self.word_dict.add(inter.guild.id, word, reading)
         await inter.response.send_message(f"📖 `{word}` → `{reading}` を辞書に追加しました。")
 
     @dict_group.command(name="remove")
     async def dict_remove_prefix(self, ctx: commands.Context, word: str):
-        removed = self.word_dict.remove(word)
+        removed = self.word_dict.remove(ctx.guild.id, word)
         await ctx.send(f"🗑️ `{word}` を削除しました。" if removed else f"`{word}` は辞書にありません。")
 
     @dict_app.command(name="remove", description="読み替え辞書から単語を削除します")
     @app_commands.describe(word="削除する単語")
     async def dict_remove_slash(self, inter: discord.Interaction, word: str):
-        removed = self.word_dict.remove(word)
+        removed = self.word_dict.remove(inter.guild.id, word)
         await inter.response.send_message(
             f"🗑️ `{word}` を削除しました。" if removed else f"`{word}` は辞書にありません。"
         )
@@ -545,13 +545,116 @@ class TTS(commands.Cog):
         await self._dict_list(inter)
 
     async def _dict_list(self, ctx_or_inter):
-        d = self.word_dict.all()
+        guild_id = ctx_or_inter.guild.id
+        d = self.word_dict.all(guild_id)
         if not d:
             msg = "辞書は空です。"
         else:
             lines = "\n".join(f"• `{w}` → `{r}`" for w, r in d.items())
-            msg = f"📖 読み替え辞書:\n{lines}"
-        await self._send(ctx_or_inter, msg)
+            msg = f"📖 読み替え辞書 ({len(d)}件):\n{lines}"
+        await self._send_chunks(ctx_or_inter, msg)
+
+    @dict_group.command(name="export")
+    async def dict_export_prefix(self, ctx: commands.Context):
+        await self._dict_export(ctx)
+
+    @dict_app.command(name="export", description="辞書をJSONファイルとしてエクスポートします")
+    async def dict_export_slash(self, inter: discord.Interaction):
+        await self._dict_export(inter)
+
+    async def _dict_export(self, ctx_or_inter):
+        import io as _io
+        import json as _json
+        guild_id = ctx_or_inter.guild.id
+        d = self.word_dict.export_dict(guild_id)
+        payload = {
+            "version": 1,
+            "data": [{"word": w, "reading": r} for w, r in d.items()],
+        }
+        buf = _io.BytesIO(_json.dumps(payload, ensure_ascii=False, indent=2).encode())
+        buf.seek(0)
+        file = discord.File(buf, filename=f"dict_{guild_id}.json")
+        if isinstance(ctx_or_inter, discord.Interaction):
+            await ctx_or_inter.response.send_message(
+                f"📤 辞書をエクスポートしました（{len(d)}件）", file=file
+            )
+        else:
+            await ctx_or_inter.send(f"📤 辞書をエクスポートしました（{len(d)}件）", file=file)
+
+    @dict_group.command(name="import")
+    async def dict_import_prefix(self, ctx: commands.Context, replace: bool = False):
+        if not ctx.message.attachments:
+            await ctx.send("⚠️ JSONファイルを添付してください。")
+            return
+        await ctx.defer()
+        await self._dict_import(ctx, ctx.message.attachments[0], replace)
+
+    @dict_app.command(name="import", description="JSONファイルから辞書をインポートします")
+    @app_commands.describe(
+        file="インポートするJSONファイル",
+        replace="True で既存辞書を全置換（デフォルト: False でマージ）",
+    )
+    async def dict_import_slash(
+        self,
+        inter: discord.Interaction,
+        file: discord.Attachment,
+        replace: bool = False,
+    ):
+        await inter.response.defer()
+        await self._dict_import(inter, file, replace)
+
+    async def _dict_import(self, ctx_or_inter, attachment: discord.Attachment, replace: bool):
+        import json as _json
+        if not attachment.filename.endswith(".json"):
+            await self._send(ctx_or_inter, "⚠️ `.json` ファイルのみ対応しています。")
+            return
+        try:
+            raw_bytes = await attachment.read()
+            data = _json.loads(raw_bytes.decode("utf-8"))
+        except Exception:
+            await self._send(ctx_or_inter, "⚠️ JSONの読み込みに失敗しました。ファイルが正しいか確認してください。")
+            return
+
+        entries = self._parse_dict_json(data)
+        if entries is None:
+            await self._send(ctx_or_inter, "⚠️ サポートされていないJSONフォーマットです。")
+            return
+
+        guild_id = ctx_or_inter.guild.id
+        count = self.word_dict.import_dict(guild_id, entries, replace=replace)
+        mode = "全置換" if replace else "マージ"
+        await self._send(ctx_or_inter, f"📥 辞書を{mode}でインポートしました（{count}件）。")
+
+    @staticmethod
+    def _parse_dict_json(data: dict) -> dict[str, str] | None:
+        """各種フォーマットのJSONを {word: reading} 形式に変換する。
+
+        対応フォーマット:
+        - 本Bot形式: {"version":1, "data":[{"word":"...","reading":"..."},...]}
+        - kuroneko形式: {"kind":"...","version":1,"data":[{"before":"...","after":"...","regex":...},...]}
+        - シンプル形式: {"word":"reading",...}
+        """
+        if not isinstance(data, dict):
+            return None
+
+        if "data" in data and isinstance(data["data"], list):
+            result = {}
+            for item in data["data"]:
+                if not isinstance(item, dict):
+                    continue
+                if "before" in item and "after" in item:
+                    # kuroneko形式
+                    result[str(item["before"])] = str(item["after"])
+                elif "word" in item and "reading" in item:
+                    # 本Bot形式
+                    result[str(item["word"])] = str(item["reading"])
+            return result if result else {}
+
+        # シンプルフラット形式 {"word": "reading"}
+        if all(isinstance(k, str) and isinstance(v, str) for k, v in data.items()):
+            return data
+
+        return None
 
     # ------------------------------------------------------------------ #
     # Voice state event
@@ -598,7 +701,7 @@ class TTS(commands.Cog):
         if not self.channel_store.is_watched(message.guild.id, message.channel.id):
             return
 
-        text = filter_message(message.content, self.word_dict.all(), self.max_length)
+        text = filter_message(message.content, self.word_dict.all(message.guild.id), self.max_length)
         if text is None:
             return
 

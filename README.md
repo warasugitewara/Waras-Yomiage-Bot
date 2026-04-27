@@ -329,11 +329,40 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 
 ### 読み替え辞書
 
+辞書はサーバーごとに独立しています。
+
 | コマンド | 説明 |
 |---|---|
 | `!dict add <単語> <読み>` / `/dict add` | 読み替えを追加（例: `!dict add w わら`） |
 | `!dict remove <単語>` / `/dict remove` | 読み替えを削除 |
 | `!dict list` / `/dict list` | 辞書の一覧を表示 |
+| `!dict export` / `/dict export` | 辞書をJSONファイルとしてダウンロード |
+| `!dict import` / `/dict import` | JSONファイルを添付して辞書をインポート（デフォルト: 既存にマージ） |
+| `!dict import true` / `/dict import replace:True` | 既存辞書を全置換してインポート |
+
+#### 辞書 JSON フォーマット
+
+エクスポートされるファイル形式：
+
+```json
+{
+  "version": 1,
+  "data": [
+    { "word": "fk",    "reading": "ふぁっきゅー" },
+    { "word": "github","reading": "ぎっとはぶ"   }
+  ]
+}
+```
+
+インポート時は以下の3形式に対応しています：
+
+| フォーマット | 条件 |
+|---|---|
+| **本Bot形式** | `data` 配列の要素が `word` / `reading` キーを持つ |
+| **kuroneko TTS Bot 形式** | `data` 配列の要素が `before` / `after` キーを持つ |
+| **シンプル形式** | `{"単語": "読み", ...}` のフラットなオブジェクト |
+
+> 💡 kuroneko TTS Bot の辞書エクスポートファイルをそのままインポートできます。
 
 ---
 
