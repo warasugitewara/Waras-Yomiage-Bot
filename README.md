@@ -102,13 +102,13 @@ done
 
 # 展開先ディレクトリ名をバージョンに関係なく統一
 mv /opt/voicevox_engine-linux-cpu-x64-* /opt/voicevox_engine 2>/dev/null || true
-chmod +x /opt/voicevox_engine/run
+chmod +x /opt/voicevox_engine/linux-cpu-x64/run
 
 # ダウンロード用ディレクトリを削除
 cd /opt && rm -rf /opt/voicevox_dl
 
 # 動作テスト（起動後 Ctrl+C で停止）
-/opt/voicevox_engine/run --host 127.0.0.1 --port 50021
+/opt/voicevox_engine/linux-cpu-x64/run --host 127.0.0.1 --port 50021
 # → "Application startup complete." が出れば OK
 ```
 
@@ -165,8 +165,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/voicevox_engine
-ExecStart=/opt/voicevox_engine/run --host 127.0.0.1 --port 50021
+WorkingDirectory=/opt/voicevox_engine/linux-cpu-x64
+ExecStart=/opt/voicevox_engine/linux-cpu-x64/run --host 127.0.0.1 --port 50021
 Restart=on-failure
 RestartSec=5
 
