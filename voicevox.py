@@ -31,7 +31,7 @@ class VoicevoxClient:
             async with session.post(
                 f"{self.base_url}/audio_query",
                 params={"text": text, "speaker": speaker},
-                timeout=aiohttp.ClientTimeout(total=5),
+                timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 if resp.status != 200:
                     raise VoicevoxError(f"audio_query failed: {resp.status}")
@@ -47,7 +47,7 @@ class VoicevoxClient:
             f"{self.base_url}/synthesis",
             params={"speaker": speaker},
             json=query,
-            timeout=aiohttp.ClientTimeout(total=15),
+            timeout=aiohttp.ClientTimeout(total=30),
         ) as resp:
             if resp.status != 200:
                 raise VoicevoxError(f"synthesis failed: {resp.status}")

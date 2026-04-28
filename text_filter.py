@@ -6,6 +6,27 @@ import re
 # URL パターン
 _URL_RE = re.compile(r"https?://\S+")
 
+# URL サービス分類テーブル（マッチ順に評価）
+_URL_LABELS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"https?://(?:www\.)?github\.com/",         re.IGNORECASE), "GitHubリンク"),
+    (re.compile(r"https?://(?:www\.)?youtu(?:\.be|be\.com)/", re.IGNORECASE), "YouTubeリンク"),
+    (re.compile(r"https?://(?:www\.)?(?:twitter|x)\.com/", re.IGNORECASE), "Twitterリンク"),
+    (re.compile(r"https?://(?:www\.)?twitch\.tv/",          re.IGNORECASE), "Twitchリンク"),
+    (re.compile(r"https?://(?:www\.)?discord\.(?:com|gg)/", re.IGNORECASE), "Discordリンク"),
+    (re.compile(r"https?://(?:www\.)?amazon\.(?:co\.jp|com)/", re.IGNORECASE), "Amazonリンク"),
+    (re.compile(r"https?://(?:www\.)?nicovideo\.jp/",       re.IGNORECASE), "ニコニコリンク"),
+    (re.compile(r"https?://(?:www\.)?pixiv\.net/",          re.IGNORECASE), "Pixivリンク"),
+    (re.compile(r"https?://(?:www\.)?steamcommunity\.com/", re.IGNORECASE), "Steamリンク"),
+]
+
+
+def _classify_url(m: re.Match) -> str:
+    url = m.group(0)
+    for pattern, label in _URL_LABELS:
+        if pattern.match(url):
+            return label
+    return "URLリンク"
+
 # Discord メンション (<@123>, <@!123>, <#123>, <@&123>)
 _MENTION_RE = re.compile(r"<(?:@[!&]?|#)\d+>")
 
@@ -33,8 +54,8 @@ def filter_message(
     if not text:
         return None
 
-    # URL を「URL省略」に置換
-    text = _URL_RE.sub("URL省略", text)
+    # URL をサービス名に置換（GitHub/YouTube 等は識別、その他は「URLリンク」）
+    text = _URL_RE.sub(_classify_url, text)
 
     # メンションを除去
     text = _MENTION_RE.sub("", text)
