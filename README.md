@@ -146,6 +146,7 @@ MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 # ERROR_WEBHOOK_URL=https://discord.com/api/webhooks/...  # Webhook 通知（任意）
 # OWNER_IDS=811515262238064640       # オーナーユーザーID（カンマ区切りで複数可）（任意）
 # BOT_STATUS=online                  # ステータス: online / idle / dnd / invisible（任意）
+# HEALTH_ENABLED=true                # /health コマンドを有効化（デフォルト: 無効）
 ```
 
 主要なスピーカーID例：
@@ -309,6 +310,7 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | `!help` / `/help` | コマンド一覧を表示。`/help join` のように引数でコマンド詳細も表示 |
 | `!about` / `/about` | ボット情報（バージョン・エンジン・リポジトリ）を表示 |
 | `!ping` / `/ping` | WebSocket 遅延と応答時間を表示 |
+| `!health` / `/health` | バージョン・Ping・サーバー数・メモリ・CPU・ネットワーク等を表示（`HEALTH_ENABLED=true` のみ使用可） |
 
 ### 音声設定（ユーザー個別）
 

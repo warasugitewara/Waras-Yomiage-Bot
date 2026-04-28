@@ -46,6 +46,8 @@ class YomiageBot(commands.Bot):
             await self.load_extension("cogs.tts")
             await self.load_extension("cogs.utility")
             await self.load_extension("cogs.owner")
+            if os.getenv("HEALTH_ENABLED", "false").lower() == "true":
+                await self.load_extension("cogs.health")
         except Exception as e:
             await self.webhook.send("error", "Cog 読み込み失敗", exc=e)
             raise
