@@ -12,7 +12,6 @@ from discord.ext import commands
 
 from channel_store import ChannelStore, WordDict
 from text_filter import filter_message
-from user_store import UserVoiceStore
 from voicevox import VoicevoxClient, VoicevoxError
 
 # Discord メッセージの安全な最大文字数
@@ -58,7 +57,8 @@ class TTS(commands.Cog):
         self.default_speed = float(os.getenv("DEFAULT_SPEED", "1.0"))
         self.max_length = int(os.getenv("MAX_TEXT_LENGTH", "100"))
 
-        self.user_voice = UserVoiceStore(default_speaker=self.default_speaker)
+        # UserVoiceStore は bot 側で管理し、Owner Cog と共有
+        self.user_voice = bot.user_voice_store
 
         # guild_id → speed(float)
         self._speed: dict[int, float] = {}

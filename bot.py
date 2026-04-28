@@ -13,6 +13,7 @@ load_dotenv()
 
 # load_dotenv() 後に import することで環境変数を確実に読み込む
 from webhook_logger import WebhookLogger  # noqa: E402
+from user_store import UserVoiceStore  # noqa: E402
 
 PREFIX = os.getenv("PREFIX", "!")
 
@@ -29,11 +30,22 @@ class YomiageBot(commands.Bot):
         # WebhookLogger は load_dotenv() 後に生成（コンストラクタ内で env を読む）
         self.webhook = WebhookLogger()
 
+        # オーナーユーザーID一覧（OWNER_IDS=id1,id2 形式、未設定時は空）
+        raw_owners = os.getenv("OWNER_IDS", "")
+        self.owner_ids: frozenset[int] = frozenset(
+            int(x.strip()) for x in raw_owners.split(",") if x.strip().isdigit()
+        )
+
+        # UserVoiceStore は TTS / Owner 両 Cog で共有（メモリキャッシュを一元管理）
+        default_speaker = int(os.getenv("DEFAULT_SPEAKER", "3"))
+        self.user_voice_store = UserVoiceStore(default_speaker=default_speaker)
+
     async def setup_hook(self):
         # Cog 読み込み
         try:
             await self.load_extension("cogs.tts")
             await self.load_extension("cogs.utility")
+            await self.load_extension("cogs.owner")
         except Exception as e:
             await self.webhook.send("error", "Cog 読み込み失敗", exc=e)
             raise

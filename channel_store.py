@@ -2,17 +2,35 @@
 
 import json
 import os
+import shutil
+import tempfile
 from pathlib import Path
 
 _DATA_DIR = Path(__file__).parent / "data"
 _CHANNELS_FILE = _DATA_DIR / "channels.json"
 _DICT_FILE = _DATA_DIR / "dict.json"
+_BACKUP_COUNT = 3
+
+
+def _rotate_backups(path: Path) -> None:
+    if not path.exists():
+        return
+    for i in range(_BACKUP_COUNT - 1, 0, -1):
+        src = path.with_suffix(f".bak{i}")
+        dst = path.with_suffix(f".bak{i + 1}")
+        if src.exists():
+            src.replace(dst)
+    shutil.copy2(str(path), str(path.with_suffix(".bak1")))
 
 
 def _load_json(path: Path, default) -> dict:
-    if path.exists():
+    """main → bak1 → bak2 → bak3 の順にフォールバックして読み込む"""
+    paths = [path] + [path.with_suffix(f".bak{i}") for i in range(1, _BACKUP_COUNT + 1)]
+    for p in paths:
+        if not p.exists():
+            continue
         try:
-            with path.open(encoding="utf-8") as f:
+            with p.open(encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             pass
@@ -20,9 +38,30 @@ def _load_json(path: Path, default) -> dict:
 
 
 def _save_json(path: Path, data) -> None:
+    """atomic write: temp→fsync→rotate→replace→dir_fsync"""
     _DATA_DIR.mkdir(exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    fd, tmp_path = tempfile.mkstemp(dir=_DATA_DIR, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        _rotate_backups(path)
+        os.replace(tmp_path, path)
+        try:
+            dir_fd = os.open(str(_DATA_DIR), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 class ChannelStore:

@@ -144,6 +144,7 @@ DEFAULT_SPEED=1.0                    # 読み上げ速度（0.5〜2.0）
 MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 # GUILD_ID=123456789012345678        # スラッシュコマンドをギルド限定で即時同期（任意）
 # ERROR_WEBHOOK_URL=https://discord.com/api/webhooks/...  # Webhook 通知（任意）
+# OWNER_IDS=811515262238064640       # オーナーユーザーID（カンマ区切りで複数可）（任意）
 ```
 
 主要なスピーカーID例：
@@ -327,7 +328,33 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 |---|---|---|
 | `!reload_speakers` / `/reload_speakers` | サーバー管理 | VOICEVOXのスピーカー情報キャッシュを再取得（ENGINE更新後などに使用） |
 
+### オーナー向け
 
+オーナーは `.env` の `OWNER_IDS` で登録したユーザーのみ使用できます。未設定の場合は使用不可です。
+
+| コマンド | 説明 |
+|---|---|
+| `!owner export_users` / `/owner export_users` | 全ユーザーのボイス設定をJSONファイルとしてエクスポート |
+| `!owner import_users` / `/owner import_users` | JSONファイルを添付してユーザーのボイス設定をインポート（デフォルト: マージ） |
+| `!owner import_users true` / `/owner import_users replace:True` | 既存設定を全置換してインポート |
+
+#### ユーザー設定 JSON フォーマット
+
+```json
+{
+  "version": 1,
+  "data": [
+    { "user_id": "811515262238064640", "speaker_id": 46 },
+    { "user_id": "987654321098765432", "speaker_id": 3  }
+  ]
+}
+```
+
+- `user_id`: Discord ユーザーID（数字文字列）
+- `speaker_id`: VOICEVOX スピーカーID（整数）
+- インポート時に不正なエントリ（user_id が数字以外、speaker_id が整数以外）は自動スキップされます
+
+### チャンネル管理
 
 | コマンド | 説明 |
 |---|---|
@@ -402,7 +429,7 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 
 読み上げ前に以下の処理が自動で行われます：
 
-- URL → 「URL省略」に置換
+- URL → サービス名に分類（例: `GitHubリンク`、`YouTubeリンク`）
 - メンション（`@user`, `#channel`）を除去
 - カスタム絵文字を名前に変換
 - `MAX_TEXT_LENGTH` を超えた文章を「…以下省略」でカット

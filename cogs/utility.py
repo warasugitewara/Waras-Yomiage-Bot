@@ -30,6 +30,11 @@ _COMMANDS = [
     ("`/dict add <word> <読み>`",  "読み替え辞書に追加"),
     ("`/dict remove <word>`",      "辞書から削除"),
     ("`/dict list`",               "辞書の一覧表示"),
+    ("**── 管理者向け ──**",     ""),
+    ("`/reload_speakers`",         "スピーカーキャッシュ更新（管理者のみ）"),
+    ("**── オーナー向け ──**",   ""),
+    ("`/owner export_users`",      "全ユーザーのボイス設定をJSONでエクスポート（オーナーのみ）"),
+    ("`/owner import_users`",      "JSONからユーザーのボイス設定をインポート（オーナーのみ）"),
     ("**── ユーティリティ ──**",   ""),
     ("`/ping`",                    "ボットの応答速度を確認"),
     ("`/about`",                   "ボット情報を表示"),
@@ -119,6 +124,24 @@ class Utility(commands.Cog):
             value=f"[ソースコード (GitHub)]({_REPO_URL})",
             inline=False,
         )
+
+        # オーナー情報（OWNER_IDS が設定されている場合のみ表示）
+        if self.bot.owner_ids:
+            owner_lines = []
+            for uid in sorted(self.bot.owner_ids):
+                user = self.bot.get_user(uid)
+                if user is None:
+                    try:
+                        user = await self.bot.fetch_user(uid)
+                    except discord.NotFound:
+                        pass
+                label = f"{user.name} [{uid}]" if user else f"[{uid}]"
+                owner_lines.append(label)
+            embed.add_field(
+                name="👑 オーナー",
+                value="\n".join(owner_lines),
+                inline=False,
+            )
 
         embed.set_footer(text=f"discord.py {discord.__version__} • {platform.system()} • コンセプト: 簡単・低遅延・直感的・エコ")
         await ctx.send(embed=embed)
