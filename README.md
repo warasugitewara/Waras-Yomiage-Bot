@@ -510,6 +510,7 @@ systemctl enable --now voicevox yomiage-bot
 「最近読み上げbotラグいなぁ」そうだ、自分で作れば良いんだ!! という所から始まりました。
 
 ##Super Extream Thanks
+
 [VOICEVOX読み上げbot](https://tts.krnk.org) 今回のbot作成の原因となったbot
 ## ライセンス
 
