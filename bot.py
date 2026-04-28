@@ -70,11 +70,22 @@ class YomiageBot(commands.Bot):
     async def on_ready(self):
         print(f"[Bot] ログイン: {self.user} (ID: {self.user.id})")
         print(f"[Bot] プレフィックス: {PREFIX}")
+
+        _status_map = {
+            "online":    discord.Status.online,
+            "idle":      discord.Status.idle,
+            "dnd":       discord.Status.dnd,
+            "invisible": discord.Status.invisible,
+        }
+        raw_status = os.getenv("BOT_STATUS", "online").lower().strip()
+        status = _status_map.get(raw_status, discord.Status.online)
+
         await self.change_presence(
+            status=status,
             activity=discord.Activity(
                 type=discord.ActivityType.listening,
                 name=f"{PREFIX}join | /join",
-            )
+            ),
         )
         await self.webhook.send(
             "info",
@@ -84,6 +95,7 @@ class YomiageBot(commands.Bot):
                 "サーバー数": str(len(self.guilds)),
                 "discord.py": discord.__version__,
                 "プレフィックス": PREFIX,
+                "ステータス": raw_status,
             },
         )
 

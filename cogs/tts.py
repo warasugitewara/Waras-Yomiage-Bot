@@ -326,7 +326,7 @@ class TTS(commands.Cog):
                 return vc, False
             await vc.move_to(voice_channel)
         else:
-            vc = await voice_channel.connect()
+            vc = await voice_channel.connect(self_deaf=True)
 
         self._ensure_worker(guild_id)
         return vc, True
