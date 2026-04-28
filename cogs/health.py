@@ -44,6 +44,7 @@ async def _collect_metrics() -> dict:
         "cpu":      cpu_pct,
         "upload":   upload,
         "download": download,
+        "disk":     psutil.disk_usage("/").percent,
     }
 
 
@@ -101,7 +102,8 @@ class Health(commands.Cog):
             name="⚙️ リソース",
             value=(
                 f"**メモリ** `{_fmt_bytes(metrics['mem'])}`\n"
-                f"**CPU** `{metrics['cpu']:.1f}%`"
+                f"**CPU** `{metrics['cpu']:.1f}%`\n"
+                f"**Disk** `{metrics['disk']:.1f}%`"
             ),
             inline=True,
         )
