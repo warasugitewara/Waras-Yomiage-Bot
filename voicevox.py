@@ -1,6 +1,5 @@
 """VOICEVOX ENGINE の非同期 HTTP クライアント"""
 
-import io
 import aiohttp
 
 
@@ -15,18 +14,19 @@ class VoicevoxClient:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            connector = aiohttp.TCPConnector(limit=20, ttl_dns_cache=300)
+            self._session = aiohttp.ClientSession(connector=connector)
         return self._session
 
     async def close(self):
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def synthesis(self, text: str, speaker: int, speed: float = 1.0) -> io.BytesIO:
-        """テキストを音声合成して WAV の BytesIO を返す"""
+    async def synthesis(self, text: str, speaker: int, speed: float = 1.0) -> bytes:
+        """テキストを音声合成して WAV の bytes を返す"""
         session = await self._get_session()
 
-        # Step 1: audio_query（ローカルなので短いタイムアウトで十分）
+        # Step 1: audio_query
         try:
             async with session.post(
                 f"{self.base_url}/audio_query",
@@ -51,9 +51,7 @@ class VoicevoxClient:
         ) as resp:
             if resp.status != 200:
                 raise VoicevoxError(f"synthesis failed: {resp.status}")
-            wav_bytes = await resp.read()
-
-        return io.BytesIO(wav_bytes)
+            return await resp.read()
 
     async def get_speakers(self) -> list[dict]:
         """利用可能なスピーカー一覧を返す"""

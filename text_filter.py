@@ -15,6 +15,9 @@ _EMOJI_RE = re.compile(r"<a?:\w+:\d+>")
 # 連続する改行・空白を1つに
 _WHITESPACE_RE = re.compile(r"\s+")
 
+# ASCII英数字のみの単語（単語境界適用対象の判定用）
+_ASCII_WORD_RE = re.compile(r"^[a-zA-Z0-9]+$")
+
 
 def filter_message(
     text: str,
@@ -44,7 +47,7 @@ def filter_message(
     for word, reading in word_dict.items():
         pat = (
             rf"\b{re.escape(word)}\b"
-            if re.fullmatch(r"[a-zA-Z0-9]+", word)
+            if _ASCII_WORD_RE.fullmatch(word)
             else re.escape(word)
         )
         text = re.sub(pat, reading, text, flags=re.IGNORECASE)

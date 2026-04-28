@@ -1,6 +1,7 @@
 """TTS Cog — 読み上げ機能の全コマンドとイベントハンドラ"""
 
 import asyncio
+import collections
 import io
 import os
 from dataclasses import dataclass
@@ -16,6 +17,9 @@ from voicevox import VoicevoxClient, VoicevoxError
 
 # Discord メッセージの安全な最大文字数
 _DISCORD_MAX = 1900
+
+# WAV キャッシュの最大エントリ数
+_WAV_CACHE_MAX = 200
 
 
 @dataclass
@@ -54,6 +58,14 @@ class TTS(commands.Cog):
         # guild_id → auto-leave task（誰もいなくなったら5秒後に退出）
         self._auto_leave_tasks: dict[int, asyncio.Task] = {}
 
+        # スピーカー一覧キャッシュ（初回fetch後に永続。reload_speakersでリセット）
+        self._speakers_cache: list[dict] | None = None
+        self._speaker_id_map: dict[int, tuple[str, str]] | None = None  # id → (char, style)
+        self._speakers_lock = asyncio.Lock()
+
+        # WAV LRU キャッシュ (text, speaker_id, speed) → bytes
+        self._wav_cache: collections.OrderedDict[tuple, bytes] = collections.OrderedDict()
+
     async def cog_unload(self):
         await self.voicevox.close()
         for synth, play in self._workers.values():
@@ -71,7 +83,7 @@ class TTS(commands.Cog):
 
     def _get_queue(self, guild_id: int) -> asyncio.Queue:
         if guild_id not in self._queues:
-            self._queues[guild_id] = asyncio.Queue()
+            self._queues[guild_id] = asyncio.Queue(maxsize=50)
         return self._queues[guild_id]
 
     def _get_wav_queue(self, guild_id: int) -> asyncio.Queue:
@@ -150,11 +162,26 @@ class TTS(commands.Cog):
                 guild = self.bot.get_guild(guild_id)
                 if guild is None or guild.voice_client is None:
                     continue
-                wav = await self.voicevox.synthesis(item.text, item.speaker_id, item.speed)
-                # 合成後に再度VC接続を確認（合成中に切断された場合は破棄）
-                if guild.voice_client is None:
-                    continue
-                await wav_q.put(wav)
+
+                cache_key = (item.text, item.speaker_id, item.speed)
+
+                # キャッシュヒット確認（awaitを挟まないので安全）
+                if cache_key in self._wav_cache:
+                    self._wav_cache.move_to_end(cache_key)
+                    wav_bytes = self._wav_cache[cache_key]
+                else:
+                    wav_bytes = await self.voicevox.synthesis(
+                        item.text, item.speaker_id, item.speed
+                    )
+                    # 合成後に再度VC接続を確認（合成中に切断された場合は破棄）
+                    if guild.voice_client is None:
+                        continue
+                    self._wav_cache[cache_key] = wav_bytes
+                    self._wav_cache.move_to_end(cache_key)
+                    if len(self._wav_cache) > _WAV_CACHE_MAX:
+                        self._wav_cache.popitem(last=False)
+
+                await wav_q.put(io.BytesIO(wav_bytes))
             except VoicevoxError as e:
                 print(f"[VOICEVOX ERROR] {e}")
             except Exception as e:
@@ -206,16 +233,43 @@ class TTS(commands.Cog):
             speaker_id=self.default_speaker,
             speed=self._guild_speed(guild_id),
         )
-        self._get_queue(guild_id).put_nowait(item)
+        try:
+            self._get_queue(guild_id).put_nowait(item)
+        except asyncio.QueueFull:
+            pass
         self._ensure_worker(guild_id)
 
+    async def _ensure_speakers_cache(self) -> bool:
+        """スピーカーキャッシュを初回のみフェッチする。成功で True、失敗で False"""
+        if self._speakers_cache is not None:
+            return True
+        async with self._speakers_lock:
+            if self._speakers_cache is not None:
+                return True
+            try:
+                speakers = await self.voicevox.get_speakers()
+                self._speakers_cache = speakers
+                self._speaker_id_map = {
+                    style["id"]: (sp["name"], style["name"])
+                    for sp in speakers
+                    for style in sp["styles"]
+                }
+                return True
+            except VoicevoxError:
+                return False
+
     async def _get_valid_speaker_ids(self) -> set[int] | None:
-        """VOICEVOX から有効な speaker_id セットを取得。失敗時は None"""
-        try:
-            speakers = await self.voicevox.get_speakers()
-            return {style["id"] for sp in speakers for style in sp["styles"]}
-        except VoicevoxError:
+        """有効な speaker_id セットを返す（キャッシュ利用）。失敗時は None"""
+        if not await self._ensure_speakers_cache():
             return None
+        return set(self._speaker_id_map.keys())
+
+    async def _resolve_speaker_name(self, speaker_id: int) -> str | None:
+        """speaker_id から「キャラ名 / スタイル名」の文字列を返す（キャッシュ利用）"""
+        if not await self._ensure_speakers_cache():
+            return None
+        entry = self._speaker_id_map.get(speaker_id)
+        return f"{entry[0]} / {entry[1]}" if entry else None
 
     async def _defer(self, ctx_or_inter, ephemeral: bool = False):
         """slash/prefix 両対応の defer。prefix では typing を表示するだけ"""
@@ -413,30 +467,16 @@ class TTS(commands.Cog):
         await self._myvoice_list(inter)
 
     async def _myvoice_list(self, ctx_or_inter):
-        try:
-            speakers = await self.voicevox.get_speakers()
-        except VoicevoxError as e:
-            await self._send(ctx_or_inter, f"⚠️ VOICEVOX に接続できません: {e}", ephemeral=True)
+        if not await self._ensure_speakers_cache():
+            await self._send(ctx_or_inter, "⚠️ VOICEVOX に接続できません。", ephemeral=True)
             return
 
         lines = ["🎤 **利用可能なスピーカー一覧**\n"]
-        for sp in speakers:
+        for sp in self._speakers_cache:
             styles = " | ".join(f"{s['name']}: `{s['id']}`" for s in sp["styles"])
             lines.append(f"**{sp['name']}**\n　{styles}")
 
         await self._send_chunks(ctx_or_inter, "\n".join(lines), ephemeral=True)
-
-    async def _resolve_speaker_name(self, speaker_id: int) -> str | None:
-        """speaker_id から「キャラ名 / スタイル名」の文字列を返す。失敗時は None"""
-        try:
-            speakers = await self.voicevox.get_speakers()
-            for sp in speakers:
-                for style in sp["styles"]:
-                    if style["id"] == speaker_id:
-                        return f"{sp['name']} / {style['name']}"
-        except VoicevoxError:
-            pass
-        return None
 
     # /voice を /myvoice set のエイリアスとして残す
     @commands.hybrid_command(name="voice", description="自分の読み上げボイスを設定します（/myvoice set と同じ）")
@@ -712,8 +752,28 @@ class TTS(commands.Cog):
             speed=self._guild_speed(message.guild.id),
         )
         queue = self._get_queue(message.guild.id)
-        await queue.put(item)
+        try:
+            queue.put_nowait(item)
+        except asyncio.QueueFull:
+            return
         self._ensure_worker(message.guild.id)
+
+    # ------------------------------------------------------------------ #
+    # Admin commands
+    # ------------------------------------------------------------------ #
+
+    @commands.hybrid_command(name="reload_speakers", description="スピーカー一覧キャッシュを更新します（VOICEVOX再起動後に使用）")
+    @commands.has_permissions(manage_guild=True)
+    async def reload_speakers(self, ctx: commands.Context):
+        await ctx.defer(ephemeral=True)
+        async with self._speakers_lock:
+            self._speakers_cache = None
+            self._speaker_id_map = None
+        ok = await self._ensure_speakers_cache()
+        if ok:
+            await ctx.send(f"🔄 スピーカーキャッシュを更新しました（{len(self._speaker_id_map)}スタイル）。", ephemeral=True)
+        else:
+            await ctx.send("⚠️ VOICEVOX に接続できませんでした。ENGINEが起動しているか確認してください。", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
