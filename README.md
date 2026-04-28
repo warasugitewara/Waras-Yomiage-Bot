@@ -384,6 +384,7 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
   "version": 1,
   "data": [
     { "word": "fk",    "reading": "ふぁっきゅー" },
+    { "word": "Copilot",    "reading": "こぱいろっと" },
     { "word": "github","reading": "ぎっとはぶ"   }
   ]
 }
