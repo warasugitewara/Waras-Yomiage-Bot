@@ -512,6 +512,7 @@ systemctl enable --now voicevox yomiage-bot
 ##Super Extream Thanks
 
 [VOICEVOX読み上げbot](https://tts.krnk.org) 今回のbot作成の原因となったbot
+
 ## ライセンス
 
 MIT
