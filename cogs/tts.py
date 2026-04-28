@@ -151,6 +151,10 @@ class TTS(commands.Cog):
             await vc.disconnect()
         except Exception as e:
             print(f"[AUTO-LEAVE ERROR] {e}")
+            await self.bot.webhook.send(
+                "warning", "自動退出エラー", exc=e,
+                context={"guild_id": str(guild_id)},
+            )
 
     async def _synthesizer(self, guild_id: int):
         """メッセージキューからTTSItemを取り出し、合成してWAVキューに積む"""
@@ -184,8 +188,16 @@ class TTS(commands.Cog):
                 await wav_q.put(io.BytesIO(wav_bytes))
             except VoicevoxError as e:
                 print(f"[VOICEVOX ERROR] {e}")
+                await self.bot.webhook.send(
+                    "warning", "VOICEVOX 合成エラー", str(e),
+                    context={"guild_id": str(guild_id)},
+                )
             except Exception as e:
                 print(f"[SYNTH ERROR] {e}")
+                await self.bot.webhook.send(
+                    "error", "合成タスク エラー", exc=e,
+                    context={"guild_id": str(guild_id)},
+                )
             finally:
                 msg_q.task_done()
 
@@ -200,14 +212,23 @@ class TTS(commands.Cog):
                 vc: discord.VoiceClient | None = guild.voice_client if guild else None
                 if vc and vc.is_connected():
                     event = asyncio.Event()
+                    play_error: list[Exception | None] = [None]
+
+                    def _after(err, *, _ev=event, _eh=play_error):
+                        _eh[0] = err
+                        loop.call_soon_threadsafe(_ev.set)
+
                     source = discord.FFmpegPCMAudio(wav, pipe=True)
-                    vc.play(
-                        source,
-                        after=lambda err: loop.call_soon_threadsafe(event.set),
-                    )
+                    vc.play(source, after=_after)
                     await event.wait()
+                    if play_error[0]:
+                        raise play_error[0]
             except Exception as e:
                 print(f"[PLAYER ERROR] {e}")
+                await self.bot.webhook.send(
+                    "warning", "再生エラー", exc=e,
+                    context={"guild_id": str(guild_id)},
+                )
             finally:
                 wav_q.task_done()
 
