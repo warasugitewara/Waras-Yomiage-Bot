@@ -36,6 +36,9 @@ _EMOJI_RE = re.compile(r"<a?:\w+:\d+>")
 # 連続する改行・空白を1つに
 _WHITESPACE_RE = re.compile(r"\s+")
 
+# 5文字以上連続する同一文字（スパム抑制用）
+_REPEAT_RE = re.compile(r"(.)\1{4,}")
+
 # ASCII英数字のみの単語（単語境界適用対象の判定用）
 _ASCII_WORD_RE = re.compile(r"^[a-zA-Z0-9]+$")
 
@@ -75,6 +78,9 @@ def filter_message(
 
     # 連続空白を整理
     text = _WHITESPACE_RE.sub(" ", text).strip()
+
+    # 同一文字の5連打以上を3文字に圧縮（wwwww→www、！！！！→！！！）
+    text = _REPEAT_RE.sub(lambda m: m.group(1) * 3, text)
 
     # 空になったら無視
     if not text:

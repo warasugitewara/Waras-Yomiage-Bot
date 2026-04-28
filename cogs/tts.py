@@ -84,13 +84,56 @@ class TTS(commands.Cog):
         # キャッシュヒット時はFFmpeg変換・VOICEVOX合成いずれも省略
         self._pcm_cache: collections.OrderedDict[tuple, bytes] = collections.OrderedDict()
 
+        # in-flight dedup: 合成中キーを asyncio.Future で管理（ギルド横断共有）
+        # 同じ (text, speaker_id, speed) が既に合成中なら Future を待つ
+        self._in_flight: dict[tuple, asyncio.Future] = {}
+
+    async def cog_load(self):
+        """Cog 読み込み完了後にウォームアップタスクを起動する"""
+        asyncio.create_task(self._warmup(), name="voicevox-warmup")
+
     async def cog_unload(self):
-        await self.voicevox.close()
+        """シャットダウン: タスクキャンセル → gather → in_flight クリア → セッションクローズ"""
+        # 1. 全タスクをキャンセル
+        tasks: list[asyncio.Task] = []
         for synth, play in self._workers.values():
-            if synth: synth.cancel()
-            if play: play.cancel()
+            if synth and not synth.done():
+                synth.cancel()
+                tasks.append(synth)
+            if play and not play.done():
+                play.cancel()
+                tasks.append(play)
         for task in self._auto_leave_tasks.values():
-            task.cancel()
+            if not task.done():
+                task.cancel()
+                tasks.append(task)
+
+        # 2. in-flight Futureをキャンセル（待機中の2次合成を解放）
+        for fut in self._in_flight.values():
+            if not fut.done():
+                fut.cancel()
+        self._in_flight.clear()
+
+        # 3. キャンセルが処理されるまで待機（finally ブロックの実行を保証）
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 4. VoicevoxClient セッションをクローズ（タスク終了後）
+        await self.voicevox.close()
+
+    async def _warmup(self):
+        """起動後に短文を事前合成してキャッシュ & VOICEVOXエンジンのモデルをウォームアップする"""
+        await asyncio.sleep(3)  # Bot接続が安定するまで待機
+        key = ("接続しました", self.default_speaker, self.default_speed)
+        if key in self._pcm_cache:
+            return
+        try:
+            wav = await self.voicevox.synthesis("接続しました", self.default_speaker, self.default_speed)
+            pcm = await _wav_to_pcm(wav)
+            self._pcm_cache[key] = pcm
+            print("[TTS] VOICEVOXウォームアップ完了（「接続しました」をキャッシュ）")
+        except Exception as e:
+            print(f"[TTS] VOICEVOXウォームアップ失敗（起動直後は正常）: {e}")
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -191,18 +234,38 @@ class TTS(commands.Cog):
                 if cache_key in self._pcm_cache:
                     self._pcm_cache.move_to_end(cache_key)
                     pcm_bytes = self._pcm_cache[cache_key]
+                elif cache_key in self._in_flight:
+                    # 別ギルドが同じテキストを合成中 → 完了を待つ
+                    try:
+                        pcm_bytes = await asyncio.shield(self._in_flight[cache_key])
+                    except Exception:
+                        continue  # 一次合成失敗 → このアイテムをスキップ
                 else:
-                    wav_bytes = await self.voicevox.synthesis(
-                        item.text, item.speaker_id, item.speed
-                    )
-                    # 合成後に再度VC接続を確認（合成中に切断された場合は破棄）
+                    # 新規合成
+                    loop = asyncio.get_running_loop()
+                    fut: asyncio.Future[bytes] = loop.create_future()
+                    self._in_flight[cache_key] = fut
+                    try:
+                        wav_bytes = await self.voicevox.synthesis(
+                            item.text, item.speaker_id, item.speed
+                        )
+                        pcm_bytes = await _wav_to_pcm(wav_bytes)
+                        # キャッシュ更新（VC切断に関わらず次回のために保存）
+                        self._pcm_cache[cache_key] = pcm_bytes
+                        self._pcm_cache.move_to_end(cache_key)
+                        if len(self._pcm_cache) > _PCM_CACHE_MAX:
+                            self._pcm_cache.popitem(last=False)
+                        fut.set_result(pcm_bytes)
+                    except Exception as e:
+                        if not fut.done():
+                            fut.set_exception(e)
+                        raise
+                    finally:
+                        self._in_flight.pop(cache_key, None)
+
+                    # 合成後にVC接続を確認（合成中に切断された場合は再生をスキップ）
                     if guild.voice_client is None:
                         continue
-                    pcm_bytes = await _wav_to_pcm(wav_bytes)
-                    self._pcm_cache[cache_key] = pcm_bytes
-                    self._pcm_cache.move_to_end(cache_key)
-                    if len(self._pcm_cache) > _PCM_CACHE_MAX:
-                        self._pcm_cache.popitem(last=False)
 
                 await pcm_q.put(pcm_bytes)
             except VoicevoxError as e:
