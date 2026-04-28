@@ -68,8 +68,8 @@ def _collapse_repeated_lines(text: str) -> str:
             count = 1
             prev_stripped = stripped
         if count <= _LINE_MAX_REPEAT:
-            result.append(line)
-    return "\n".join(result)
+            result.append(stripped)   # stripped を使って余分な空白も除去
+    return " ".join(result)           # 改行ではなく半角スペースで連結
 
 
 def filter_message(
