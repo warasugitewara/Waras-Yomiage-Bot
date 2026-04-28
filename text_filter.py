@@ -36,11 +36,40 @@ _EMOJI_RE = re.compile(r"<a?:\w+:\d+>")
 # 連続する改行・空白を1つに
 _WHITESPACE_RE = re.compile(r"\s+")
 
-# 5文字以上連続する同一文字（スパム抑制用）
+# 5文字以上連続する同一文字（横方向スパム抑制）
 _REPEAT_RE = re.compile(r"(.)\1{4,}")
 
 # ASCII英数字のみの単語（単語境界適用対象の判定用）
 _ASCII_WORD_RE = re.compile(r"^[a-zA-Z0-9]+$")
+
+# 縦方向スパムで連続する同一行を最大3行に圧縮
+_LINE_MAX_REPEAT = 3
+
+
+def _collapse_repeated_lines(text: str) -> str:
+    """改行で繰り返される同一行を最大 _LINE_MAX_REPEAT 行に圧縮する。
+
+    例:
+        "w\\nw\\nw\\nw\\nw" → "w\\nw\\nw"
+        "草\\n草\\n草\\n草" → "草\\n草\\n草"
+    空行・空白のみの行は比較対象から除外（ただし出力には含めない）。
+    """
+    lines = text.splitlines()
+    result: list[str] = []
+    prev_stripped: str | None = None
+    count = 0
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue  # 空行は捨てる（後続の whitespace collapse でどうせ消える）
+        if stripped == prev_stripped:
+            count += 1
+        else:
+            count = 1
+            prev_stripped = stripped
+        if count <= _LINE_MAX_REPEAT:
+            result.append(line)
+    return "\n".join(result)
 
 
 def filter_message(
@@ -76,10 +105,13 @@ def filter_message(
         )
         text = re.sub(pat, reading, text, flags=re.IGNORECASE)
 
-    # 連続空白を整理
+    # 縦方向スパム: 同じ行が3行以上連続する場合に圧縮
+    text = _collapse_repeated_lines(text)
+
+    # 連続空白を整理（改行もスペースに正規化）
     text = _WHITESPACE_RE.sub(" ", text).strip()
 
-    # 同一文字の5連打以上を3文字に圧縮（wwwww→www、！！！！→！！！）
+    # 横方向スパム: 同一文字の5連打以上を3文字に圧縮（wwwww→www、！！！！→！！！）
     text = _REPEAT_RE.sub(lambda m: m.group(1) * 3, text)
 
     # 空になったら無視
