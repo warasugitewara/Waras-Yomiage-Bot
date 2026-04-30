@@ -148,7 +148,7 @@ class Utility(commands.Cog):
 
     # ── help ──────────────────────────────────────────────────────────────
 
-    @commands.hybrid_command(name="help", description="コマンド一覧を表示します")
+    @commands.hybrid_command(name="help", aliases=["h", "?", "info"], description="コマンド一覧を表示します")
     @app_commands.describe(command="詳細を見たいコマンド名（省略可）")
     async def help(self, ctx: commands.Context, command: str | None = None):
         await ctx.defer(ephemeral=True)
