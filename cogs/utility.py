@@ -10,35 +10,34 @@ from discord.ext import commands
 _VERSION = "1.0.0"
 _REPO_URL = "https://github.com/warasugitewara/Waras-Yomiage-Bot"
 
-# コマンド一覧テキスト（help 用）
-_COMMANDS = [
-    ("`/join` `!join`",           "VC に参加して読み上げ開始"),
-    ("`/leave` `!leave`",         "VC から退出"),
-    ("`/skip` `!skip`",           "現在の読み上げをスキップ"),
-    ("`/speed [倍率]` `!speed`",  "読み上げ速度を変更 (0.5–2.0)"),
-    ("**── ボイス設定 ──**",       ""),
-    ("`/myvoice list`",            "利用可能なスピーカー一覧を表示"),
-    ("`/myvoice set <id>`",        "自分のボイスを設定"),
-    ("`/myvoice reset`",           "ボイスをデフォルトに戻す"),
-    ("`/myvoice info`",            "現在のボイス設定を確認"),
-    ("`/voice <id>`",              "myvoice set のエイリアス"),
-    ("**── チャンネル管理 ──**",   ""),
-    ("`/listen add [ch]`",         "読み上げ対象チャンネルを追加"),
-    ("`/listen remove [ch]`",      "読み上げ対象チャンネルを削除"),
-    ("`/listen list`",             "読み上げ対象チャンネル一覧"),
-    ("**── 辞書 ──**",             ""),
-    ("`/dict add <word> <読み>`",  "読み替え辞書に追加"),
-    ("`/dict remove <word>`",      "辞書から削除"),
-    ("`/dict list`",               "辞書の一覧表示"),
-    ("**── 管理者向け ──**",     ""),
-    ("`/reload_speakers`",         "スピーカーキャッシュ更新（管理者のみ）"),
-    ("**── オーナー向け ──**",   ""),
-    ("`/owner export_users`",      "全ユーザーのボイス設定をJSONでエクスポート（オーナーのみ）"),
-    ("`/owner import_users`",      "JSONからユーザーのボイス設定をインポート（オーナーのみ）"),
-    ("**── ユーティリティ ──**",   ""),
-    ("`/ping`",                    "ボットの応答速度を確認"),
-    ("`/about`",                   "ボット情報を表示"),
-    ("`/help`",                    "このヘルプを表示"),
+# カテゴリーごとのコマンド一覧
+_HELP_DATA = [
+    ("🎙️ 基本", [
+        ("`/join` `!join`", "VCに参加して読み上げ開始"),
+        ("`/leave` `!leave`", "VCから退出 (aliases: `!quit`, `!stop`, `!bye`)"),
+        ("`/skip` `!skip`", "現在の再生をスキップ"),
+        ("`/speed` `!speed` [倍率]", "読み上げ速度を変更 (0.5–2.0)"),
+    ]),
+    ("🎤 ボイス設定", [
+        ("`/myvoice list`", "利用可能なスピーカー一覧を表示"),
+        ("`/myvoice set <id>`", "自分のボイスを設定 (alias: `!voice`)"),
+        ("`/myvoice info`", "現在のボイス設定を確認"),
+        ("`/myvoice reset`", "ボイス設定を初期化"),
+    ]),
+    ("📢 チャンネル・辞書", [
+        ("`/listen <add|remove|list>`", "読み上げチャンネルの管理"),
+        ("`/dict <add|remove|list>`", "読み替え辞書の管理"),
+        ("`/dict <export|import>`", "辞書の書き出し・読み込み"),
+    ]),
+    ("👑 管理・オーナー", [
+        ("`/reload_speakers`", "スピーカー情報を再取得"),
+        ("`/owner <export|import>_users`", "ユーザー設定の管理"),
+    ]),
+    ("🛠️ ユーティリティ", [
+        ("`/ping`", "応答速度を確認"),
+        ("`/about`", "ボット情報を表示 (alias: `!status`)"),
+        ("`/help`", "このヘルプを表示 (aliases: `!h`, `!?`)"),
+    ]),
 ]
 
 
@@ -164,7 +163,7 @@ class Utility(commands.Cog):
                 color=discord.Color.blurple(),
             )
             if cmd.aliases:
-                embed.add_field(name="エイリアス", value=", ".join(cmd.aliases))
+                embed.add_field(name="エイリアス", value=", ".join(f"`{a}`" for a in cmd.aliases))
             if hasattr(cmd, "clean_params") and cmd.clean_params:
                 params = " ".join(f"<{p}>" for p in cmd.clean_params)
                 embed.add_field(name="引数", value=f"`{params}`")
@@ -176,8 +175,11 @@ class Utility(commands.Cog):
             description=f"スラッシュ `/` またはプレフィックス `{os.getenv('PREFIX', '!')}` で使えます。",
             color=discord.Color.blurple(),
         )
-        for name, desc in _COMMANDS:
-            embed.add_field(name=name, value=desc or "\u200b", inline=False)
+        
+        for category, cmds in _HELP_DATA:
+            val = "\n".join(f"**{name}** : {desc}" for name, desc in cmds)
+            embed.add_field(name=category, value=val, inline=False)
+
         embed.set_footer(text="/help <コマンド名> で詳細表示")
         await ctx.send(embed=embed, ephemeral=True)
 
