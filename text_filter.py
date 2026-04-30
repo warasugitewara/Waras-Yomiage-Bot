@@ -8,6 +8,7 @@ _URL_RE = re.compile(r"https?://\S+")
 
 # URL サービス分類テーブル（マッチ順に評価）
 _URL_LABELS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"https?://(?:www\.)?warasugi\.com/",       re.IGNORECASE), "わらすぎのURL"),
     (re.compile(r"https?://(?:www\.)?github\.com/",         re.IGNORECASE), "GitHubリンク"),
     (re.compile(r"https?://(?:www\.)?youtu(?:\.be|be\.com)/", re.IGNORECASE), "YouTubeリンク"),
     (re.compile(r"https?://(?:www\.)?(?:twitter|x)\.com/", re.IGNORECASE), "Twitterリンク"),
