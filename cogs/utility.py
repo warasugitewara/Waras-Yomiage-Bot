@@ -62,7 +62,7 @@ class Utility(commands.Cog):
 
     # ── about ─────────────────────────────────────────────────────────────
 
-    @commands.hybrid_command(name="about", description="ボット情報を表示します")
+    @commands.hybrid_command(name="about", aliases=["status"], description="ボット情報を表示します")
     async def about(self, ctx: commands.Context):
         await ctx.defer()
         prefix = os.getenv("PREFIX", "!")

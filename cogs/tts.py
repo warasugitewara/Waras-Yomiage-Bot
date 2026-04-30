@@ -440,7 +440,7 @@ class TTS(commands.Cog):
         if ctx.interaction:
             await ctx.send("✅", ephemeral=True)
 
-    @commands.hybrid_command(name="leave", description="VCから退出して読み上げを停止します")
+    @commands.hybrid_command(name="leave", aliases=["quit", "stop", "bye"], description="VCから退出して読み上げを停止します")
     async def leave(self, ctx: commands.Context):
         vc: discord.VoiceClient | None = ctx.guild.voice_client
         if vc is None:
