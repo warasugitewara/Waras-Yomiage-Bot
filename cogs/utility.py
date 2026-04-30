@@ -14,7 +14,7 @@ _REPO_URL = "https://github.com/warasugitewara/Waras-Yomiage-Bot"
 _HELP_DATA = [
     ("🎙️ 基本", [
         ("`/join` `!join`", "VCに参加して読み上げ開始"),
-        ("`/leave` `!leave`", "VCから退出 (aliases: `!quit`, `!stop`, `!bye`)"),
+        ("`/leave` `!leave`", "VCから退出 (aliases: `!quit`, `!stop`, `!bye`, `!exit`)"),
         ("`/skip` `!skip`", "現在の再生をスキップ"),
         ("`/speed` `!speed` [倍率]", "読み上げ速度を変更 (0.5–2.0)"),
     ]),
