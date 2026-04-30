@@ -18,7 +18,7 @@ from voicevox import VoicevoxClient, VoicevoxError
 _DISCORD_MAX = 1900
 
 # PCM キャッシュの最大エントリ数（WAV→PCM変換済みバイト列）
-_PCM_CACHE_MAX = 200
+_PCM_CACHE_MAX = 100
 
 
 async def _wav_to_pcm(wav_bytes: bytes) -> bytes:
@@ -29,6 +29,7 @@ async def _wav_to_pcm(wav_bytes: bytes) -> bytes:
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg", "-i", "pipe:0",
         "-f", "s16le", "-ar", "48000", "-ac", "2",
+        "-threads", "1",
         "-loglevel", "quiet", "pipe:1",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,

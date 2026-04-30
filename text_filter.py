@@ -97,13 +97,30 @@ def filter_message(
 
     # 読み替え辞書を適用（大文字小文字区別なし）
     # ASCII のみの単語は \b で単語境界を付けて部分一致を防ぐ
-    for word, reading in word_dict.items():
-        pat = (
-            rf"\b{re.escape(word)}\b"
-            if _ASCII_WORD_RE.fullmatch(word)
-            else re.escape(word)
-        )
-        text = re.sub(pat, reading, text, flags=re.IGNORECASE)
+    if word_dict:
+        # 単語境界が必要なものと不要なものを分けて正規表現を構築
+        boundary_words = []
+        normal_words = []
+        for word in word_dict:
+            if _ASCII_WORD_RE.fullmatch(word):
+                boundary_words.append(re.escape(word))
+            else:
+                normal_words.append(re.escape(word))
+        
+        patterns = []
+        if boundary_words:
+            patterns.append(rf"\b({'|'.join(boundary_words)})\b")
+        if normal_words:
+            patterns.append(f"({'|'.join(normal_words)})")
+        
+        if patterns:
+            combined_pat = re.compile("|".join(patterns), re.IGNORECASE)
+            lower_dict = {k.lower(): v for k, v in word_dict.items()}
+            
+            def _dict_replace(m: re.Match) -> str:
+                return lower_dict.get(m.group(0).lower(), m.group(0))
+
+            text = combined_pat.sub(_dict_replace, text)
 
     # 縦方向スパム: 同じ行が3行以上連続する場合に圧縮
     text = _collapse_repeated_lines(text)
