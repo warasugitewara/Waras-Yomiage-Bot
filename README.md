@@ -26,7 +26,7 @@ VOICEVOX を使ったローカル完結型 Discord 読み上げBot。
 
 | 項目 | 推奨値 | 最小値 | 備考 |
 |---|---|---|---|
-| CPU | 2 vCPU | 1 vCPU | VOICEVOX 合成は CPU 負荷が高め。1コアだと合成に時間がかかる場合がある |
+| CPU | 4 vCPU | 1 vCPU | VOICEVOX 合成は CPU 負荷が高め。1コアだと合成に時間がかかる場合がある |
 | RAM | 2048 MB | 1024 MB | ENGINE 起動時ピーク ~800MB + Python Bot ~150MB + OS |
 | Swap | 512 MB | 0 MB | モデル読み込み時のバッファとして推奨 |
 | Disk | 10 GB | 6 GB | OS ~3GB・ENGINE ~2GB・ログ/余裕分 |
