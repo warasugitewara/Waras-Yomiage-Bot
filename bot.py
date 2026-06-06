@@ -14,6 +14,7 @@ load_dotenv()
 # load_dotenv() 後に import することで環境変数を確実に読み込む
 from webhook_logger import WebhookLogger  # noqa: E402
 from user_store import UserVoiceStore  # noqa: E402
+from cogs.uptime_kuma import kuma_heartbeat  # noqa: E402
 
 PREFIX = os.getenv("PREFIX", "!")
 
@@ -68,6 +69,10 @@ class YomiageBot(commands.Bot):
 
         # app_commands（スラッシュ）エラーハンドラを登録
         self.tree.on_error = self._on_tree_error
+
+        # Uptime Kuma ハートビート
+        if os.getenv("UPTIME_KUMA_PUSH_URL"):
+            asyncio.create_task(kuma_heartbeat())
 
     async def on_ready(self):
         print(f"[Bot] ログイン: {self.user} (ID: {self.user.id})")
