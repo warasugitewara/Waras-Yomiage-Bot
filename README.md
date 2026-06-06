@@ -537,7 +537,7 @@ systemctl enable --now voicevox yomiage-bot
 ## 著者
 
 - [warasugitewara](https://github.com/warasugitewara)
-- Co-authored with [Claude](https://claude.ai) (Anthropic)
+- [@claude](https://github.com/claude) (Anthropic)
 
 ## ライセンス
 
