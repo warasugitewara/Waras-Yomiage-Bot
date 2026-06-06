@@ -147,6 +147,7 @@ MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 # OWNER_IDS=811515262238064640       # オーナーユーザーID（カンマ区切りで複数可）（任意）
 # BOT_STATUS=online                  # ステータス: online / idle / dnd / invisible（任意）
 # HEALTH_ENABLED=true                # /health コマンドを有効化（デフォルト: 無効）
+# UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&ping=  # Uptime Kuma 死活監視（任意）
 ```
 
 主要なスピーカーID例：
@@ -435,6 +436,26 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
    ```env
    ERROR_WEBHOOK_URL=https://discord.com/api/webhooks/xxxx/yyyy
    ```
+
+---
+
+## Uptime Kuma 監視（オプション）
+
+`.env` に `UPTIME_KUMA_PUSH_URL` を設定すると、Bot が **60秒ごと** に Uptime Kuma の Push URL へリクエストを送信し、死活監視できます。
+
+```env
+UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&ping=
+```
+
+### 設定手順
+
+1. Uptime Kuma で **新しいモニター** を作成
+2. モニタータイプ: **Push** を選択
+3. 生成された Push URL（`?status=up&msg=OK&ping=` 付き）をコピー
+4. `.env` の `UPTIME_KUMA_PUSH_URL` に貼り付け
+5. ハートビート間隔（Uptime Kuma 側）を **90秒以上** に設定（Bot は60秒ごとに送信）
+
+起動時にログへ `[KUMA] ハートビート開始` と出力されれば正常に動作しています。
 
 ---
 
