@@ -2,18 +2,19 @@ import os
 import asyncio
 import aiohttp
 
-PUSH_URL = os.getenv("UPTIME_KUMA_PUSH_URL")
-
 async def kuma_heartbeat():
-    if not PUSH_URL:
+    push_url = os.getenv("UPTIME_KUMA_PUSH_URL")
+    if not push_url:
+        print("[KUMA] UPTIME_KUMA_PUSH_URL が未設定のためハートビートを無効化")
         return
 
+    print(f"[KUMA] ハートビート開始")
     timeout = aiohttp.ClientTimeout(total=10)
     while True:
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(
-                    PUSH_URL,
+                    push_url,
                     params={
                         "status": "up",
                         "msg": "running"
