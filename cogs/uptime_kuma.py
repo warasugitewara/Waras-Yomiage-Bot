@@ -8,9 +8,10 @@ async def kuma_heartbeat():
     if not PUSH_URL:
         return
 
+    timeout = aiohttp.ClientTimeout(total=10)
     while True:
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(
                     PUSH_URL,
                     params={
@@ -21,6 +22,6 @@ async def kuma_heartbeat():
                     pass
 
         except Exception as e:
-            print(f"[KUMA] {e}")
+            print(f"[KUMA] heartbeat failed: {type(e).__name__}")
 
         await asyncio.sleep(60)

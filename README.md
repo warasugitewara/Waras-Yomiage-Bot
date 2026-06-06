@@ -509,8 +509,14 @@ systemctl enable --now voicevox yomiage-bot
 ### thanks for readimg
 - 「最近読み上げbotラグいなぁ」そうだ、自分で作れば良いんだ!! という所から始まりました。
 - 私は**満別花丸**を愛用しております
+
 ## Super Extream Thanks
 [VOICEVOX読み上げbot](https://tts.krnk.org) 今回のbot作成の原因となったbot
+
+## 著者
+
+- [warasugitewara](https://github.com/warasugitewara)
+- Co-authored with [Claude](https://claude.ai) (Anthropic)
 
 ## ライセンス
 
