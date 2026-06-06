@@ -13,13 +13,7 @@ async def kuma_heartbeat():
     while True:
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(
-                    push_url,
-                    params={
-                        "status": "up",
-                        "msg": "running"
-                    }
-                ):
+                async with session.get(push_url):
                     pass
 
         except Exception as e:
