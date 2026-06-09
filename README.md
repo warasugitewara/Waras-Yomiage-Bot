@@ -538,7 +538,7 @@ systemctl enable --now voicevox yomiage-bot
 ## 著者
 
 - [warasugitewara](https://github.com/warasugitewara)
-- [@claude](https://github.com/claude) (Anthropic)
+- [claude](https://github.com/claude) (Anthropic)
 - (最初期の基盤はGh copilotのsonnetで作成しました)
 
 ## ライセンス
