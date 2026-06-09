@@ -79,6 +79,7 @@ python3 --version
 
 CPU 版（GPU なし）のヘッドレスエンジンを使います。  
 最新版は **7z 分割形式**（`.7z.001`, `.7z.002`, ...）で配布されているため、`p7zip-full` で展開します。
+* ※ 私はGPU演算のVMを別途用意しました。
 
 ```bash
 mkdir -p /opt/voicevox_dl && cd /opt/voicevox_dl
