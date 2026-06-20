@@ -1,4 +1,4 @@
-# 🎙️ Waras-Yomiage-Bot
+# 🎙️ Wara's-Yomiage-Bot
 
 VOICEVOX を使ったローカル完結型 Discord 読み上げBot。
 
