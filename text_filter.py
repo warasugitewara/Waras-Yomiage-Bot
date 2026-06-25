@@ -28,6 +28,15 @@ def _classify_url(m: re.Match) -> str:
             return label
     return "URLリンク"
 
+# スポイラー ||...|| （ネタバレ防止のため中身ごと読み上げない）
+_SPOILER_RE = re.compile(r"\|\|.+?\|\|", re.DOTALL)
+
+# コードブロック ```...``` （読み上げ対象外。インラインより先に処理する）
+_CODEBLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
+
+# インラインコード `...` （バッククォートのみ除去して中身は読む）
+_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+
 # Discord メンション (<@123>, <@!123>, <#123>, <@&123>)
 _MENTION_RE = re.compile(r"<(?:@[!&]?|#)\d+>")
 
@@ -87,6 +96,12 @@ def filter_message(
     if not text:
         return None
 
+    # スポイラー・コードブロックは読み上げない（中身ごと除去）
+    text = _SPOILER_RE.sub("", text)
+    text = _CODEBLOCK_RE.sub("", text)
+    # インラインコードはバッククォートだけ外して中身は読む
+    text = _INLINE_CODE_RE.sub(lambda m: m.group(1), text)
+
     # URL をサービス名に置換（GitHub/YouTube 等は識別、その他は「URLリンク」）
     text = _URL_RE.sub(_classify_url, text)
 
@@ -97,27 +112,23 @@ def filter_message(
     text = _EMOJI_RE.sub(lambda m: m.group(0).split(":")[1], text)
 
     # 読み替え辞書を適用（大文字小文字区別なし）
-    # ASCII のみの単語は \b で単語境界を付けて部分一致を防ぐ
+    # 正規表現の交替 (A|B) は「先に書いた方」を優先するため、長い語から並べる
+    # ことで最長一致にする。例: 「東京駅」を「東京」より先に試す。
+    # ASCII のみの単語は \b で単語境界を付けて部分一致を防ぐ。
     if word_dict:
-        # 単語境界が必要なものと不要なものを分けて正規表現を構築
-        boundary_words = []
-        normal_words = []
-        for word in word_dict:
+        sorted_words = sorted(word_dict, key=len, reverse=True)
+        alternatives = []
+        for word in sorted_words:
+            esc = re.escape(word)
             if _ASCII_WORD_RE.fullmatch(word):
-                boundary_words.append(re.escape(word))
+                alternatives.append(rf"\b{esc}\b")
             else:
-                normal_words.append(re.escape(word))
-        
-        patterns = []
-        if boundary_words:
-            patterns.append(rf"\b({'|'.join(boundary_words)})\b")
-        if normal_words:
-            patterns.append(f"({'|'.join(normal_words)})")
-        
-        if patterns:
-            combined_pat = re.compile("|".join(patterns), re.IGNORECASE)
+                alternatives.append(esc)
+
+        if alternatives:
+            combined_pat = re.compile("|".join(alternatives), re.IGNORECASE)
             lower_dict = {k.lower(): v for k, v in word_dict.items()}
-            
+
             def _dict_replace(m: re.Match) -> str:
                 return lower_dict.get(m.group(0).lower(), m.group(0))
 

@@ -850,6 +850,11 @@ class TTS(commands.Cog):
         if not self.channel_store.is_watched(message.guild.id, message.channel.id):
             return
 
+        # コマンド呼び出し（プレフィックスで始まる）は読み上げない
+        prefix = self.bot.command_prefix
+        if isinstance(prefix, str) and message.content.startswith(prefix):
+            return
+
         text = filter_message(message.content, self.word_dict.all(message.guild.id), self.max_length)
         if text is None:
             return
