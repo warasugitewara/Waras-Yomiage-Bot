@@ -31,18 +31,22 @@ VOICEVOX を使った **ローカル完結型** の Discord 読み上げ (TTS) B
 
 ## 📋 目次
 
-- [必要なもの](#必要なもの)
-- [クイックスタート](#クイックスタート)
-- [Proxmox LXC 環境構築（完全手順）](#️-proxmox-lxc-環境構築完全手順)
-- [コマンド一覧](#コマンド一覧)
-- [VC 参加時の動作](#vc-参加時の動作)
-- [Webhook 通知（オプション）](#webhook-通知オプション)
-- [Uptime Kuma 監視（オプション）](#uptime-kuma-監視オプション)
-- [メッセージの前処理](#メッセージの前処理)
-- [systemd 設定（自動起動）](#systemd-設定自動起動)
-- [ライセンス](#ライセンス)
+- [必要なもの](#requirements)
+- [クイックスタート](#quickstart)
+- [Proxmox LXC 環境構築（完全手順）](#proxmox-setup)
+- [コマンド一覧](#commands)
+- [VC 参加時の動作](#vc-behavior)
+- [Webhook 通知（オプション）](#webhook)
+- [Uptime Kuma 監視（オプション）](#uptime-kuma)
+- [メッセージの前処理](#preprocessing)
+- [systemd 設定（自動起動）](#systemd-config)
+- [ライセンス](#license)
+
+> 💡 GitHub公式アプリなど一部のビューアでは、上記のページ内リンクが正しく動作しない場合があります。その場合はブラウザ（Safari/Chromeなど）で開いてご覧ください。
 
 ---
+
+<a id="requirements"></a>
 
 ## 必要なもの
 
@@ -54,9 +58,11 @@ VOICEVOX を使った **ローカル完結型** の Discord 読み上げ (TTS) B
 
 ---
 
+<a id="quickstart"></a>
+
 ## クイックスタート
 
-VOICEVOX ENGINE が既に手元で動く環境（ローカル PC など）向けの最短手順です。本番運用や Proxmox 上での構築は [Proxmox LXC 環境構築](#️-proxmox-lxc-環境構築完全手順) を参照してください。
+VOICEVOX ENGINE が既に手元で動く環境（ローカル PC など）向けの最短手順です。本番運用や Proxmox 上での構築は [Proxmox LXC 環境構築](#proxmox-setup) を参照してください。
 
 ### 1. VOICEVOX ENGINE を起動
 
@@ -85,6 +91,8 @@ python bot.py
 ```
 
 ---
+
+<a id="proxmox-setup"></a>
 
 ## 🖥️ Proxmox LXC 環境構築（完全手順）
 
@@ -332,6 +340,8 @@ curl http://localhost:50021/version
 
 ---
 
+<a id="commands"></a>
+
 ## コマンド一覧
 
 prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方に対応しています。
@@ -452,6 +462,8 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 
 ---
 
+<a id="vc-behavior"></a>
+
 ## VC 参加時の動作
 
 - `/join` 実行時にボットは自動的に **スピーカーミュート（デフ）状態** で参加します
@@ -460,6 +472,8 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 - VCに人間が **誰もいなくなってから5秒後** に自動退出します（Bot はカウント外）
 
 ---
+
+<a id="webhook"></a>
 
 ## Webhook 通知（オプション）
 
@@ -485,6 +499,8 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 
 ---
 
+<a id="uptime-kuma"></a>
+
 ## Uptime Kuma 監視（オプション）
 
 `.env` に `UPTIME_KUMA_PUSH_URL` を設定すると、Bot が **60秒ごと** に Uptime Kuma の Push URL へリクエストを送信し、死活監視できます。
@@ -505,6 +521,8 @@ UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&pi
 
 ---
 
+<a id="preprocessing"></a>
+
 ## メッセージの前処理
 
 読み上げ前に以下の処理が自動で行われます：
@@ -523,6 +541,8 @@ UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&pi
 > 💡 縦横どちらのスパムにも対応しています。例えば `w` を20行貼っても「w w w」として読み上げます。
 
 ---
+
+<a id="systemd-config"></a>
 
 ## systemd 設定（自動起動）
 
@@ -588,6 +608,8 @@ systemctl enable --now voicevox yomiage-bot
 [VOICEVOX読み上げbot](https://tts.krnk.org) 今回のbot作成の原因となったbot
 
 ---
+
+<a id="license"></a>
 
 ## ライセンス
 
