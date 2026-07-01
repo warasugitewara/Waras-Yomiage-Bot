@@ -1,10 +1,46 @@
-# 🎙️ Wara's-Yomiage-Bot
+# 🎙️ Wara's Yomiage Bot
 
-VOICEVOX を使ったローカル完結型 Discord 読み上げBot。
+<p>
+  <img alt="version" src="https://img.shields.io/badge/version-1.0.0-blue">
+  <img alt="python" src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white">
+  <img alt="discord.py" src="https://img.shields.io/badge/discord.py-2.3%2B-5865F2?logo=discord&logoColor=white">
+  <img alt="voicevox" src="https://img.shields.io/badge/VOICEVOX-ENGINE-orange">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
+</p>
 
-**コンセプト: シンプル・高速・直感的・エコ**
+VOICEVOX を使った **ローカル完結型** の Discord 読み上げ (TTS) Bot です。
 
-外部 TTS サービスに依存せず、VOICEVOX ENGINE をローカルで動かすことで無駄な遅延を削減し、高いパフォーマンスを実現します。
+外部 TTS サービスに依存せず、VOICEVOX ENGINE を自前でホストすることで無駄な遅延を削減し、高いパフォーマンスと安定性を実現します。
+
+> **コンセプト:** シンプル・高速・直感的・エコ
+
+---
+
+## ✨ 特徴
+
+| | |
+|---|---|
+| 🚀 **低遅延** | ローカル VOICEVOX ENGINE と直結し、外部 API 待ちが発生しない |
+| 🎭 **ユーザーごとのボイス設定** | メンバー全員が自分専用のスピーカー・スタイルを選択可能 |
+| 📖 **サーバー独自の読み替え辞書** | 単語→読みの変換をサーバーごとに管理・インポート/エクスポート対応 |
+| 🧹 **賢いメッセージ前処理** | URL・メンション・絵文字の整形、縦横スパム圧縮を自動処理 |
+| 🔔 **Webhook 通知 / Uptime Kuma 連携** | 起動・エラーを Discord へ通知、死活監視にも対応 |
+| ⚙️ **prefix / スラッシュコマンド両対応** | `!command` と `/command` のどちらでも操作可能 |
+
+---
+
+## 📋 目次
+
+- [必要なもの](#必要なもの)
+- [クイックスタート](#クイックスタート)
+- [Proxmox LXC 環境構築（完全手順）](#️-proxmox-lxc-環境構築完全手順)
+- [コマンド一覧](#コマンド一覧)
+- [VC 参加時の動作](#vc-参加時の動作)
+- [Webhook 通知（オプション）](#webhook-通知オプション)
+- [Uptime Kuma 監視（オプション）](#uptime-kuma-監視オプション)
+- [メッセージの前処理](#メッセージの前処理)
+- [systemd 設定（自動起動）](#systemd-設定自動起動)
+- [ライセンス](#ライセンス)
 
 ---
 
@@ -18,7 +54,42 @@ VOICEVOX を使ったローカル完結型 Discord 読み上げBot。
 
 ---
 
+## クイックスタート
+
+VOICEVOX ENGINE が既に手元で動く環境（ローカル PC など）向けの最短手順です。本番運用や Proxmox 上での構築は [Proxmox LXC 環境構築](#️-proxmox-lxc-環境構築完全手順) を参照してください。
+
+### 1. VOICEVOX ENGINE を起動
+
+[Releases](https://github.com/VOICEVOX/voicevox_engine/releases) から環境に合ったパッケージ（CPU のみの場合は `linux-cpu.zip` など）をダウンロードして展開します。
+
+```bash
+./run --host 127.0.0.1 --port 50021
+```
+
+### 2. Bot をセットアップ
+
+```bash
+git clone https://github.com/warasugitewara/Waras-Yomiage-Bot.git
+cd Waras-Yomiage-Bot
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# .env を編集して DISCORD_TOKEN を設定
+```
+
+### 3. Bot を起動
+
+```bash
+source .venv/bin/activate
+python bot.py
+```
+
+---
+
 ## 🖥️ Proxmox LXC 環境構築（完全手順）
+
+<details>
+<summary>クリックして展開（Proxmox 上に本番環境を構築する場合の完全手順）</summary>
 
 ### コンテナ作成（Proxmox Web UI）
 
@@ -36,7 +107,7 @@ VOICEVOX を使ったローカル完結型 Discord 読み上げBot。
 
 #### 手順
 
-1. Proxmox Web UI → **ノード** → **local（またはストレージ）** → **CT Templates**  
+1. Proxmox Web UI → **ノード** → **local（またはストレージ）** → **CT Templates**
    「Templates」ボタン → `debian-13-standard` を検索して **Download**
 2. **Create CT** をクリックし、以下を設定：
 
@@ -54,8 +125,6 @@ VOICEVOX を使ったローカル完結型 Discord 読み上げBot。
    | DNS | DNS | デフォルトのまま |
 
 3. **Finish** → コンテナを選択して **Start**
-
----
 
 ### コンテナ内セットアップ
 
@@ -77,7 +146,7 @@ python3 --version
 
 #### 3. VOICEVOX ENGINE のインストール
 
-CPU 版（GPU なし）のヘッドレスエンジンを使います。  
+CPU 版（GPU なし）のヘッドレスエンジンを使います。
 最新版は **7z 分割形式**（`.7z.001`, `.7z.002`, ...）で配布されているため、`p7zip-full` で展開します。
 * ※ 私はGPU演算のVMを別途用意しました。
 
@@ -114,7 +183,7 @@ cd /opt/voicevox_engine/linux-cpu-x64
 # → "Application startup complete." が出れば OK
 ```
 
-> ℹ️ バージョンアップ時は `VVOX_VER` の値を書き換えて同じ手順を実行してください。  
+> ℹ️ バージョンアップ時は `VVOX_VER` の値を書き換えて同じ手順を実行してください。
 > リリース一覧: [GitHub Releases](https://github.com/VOICEVOX/voicevox_engine/releases)
 
 #### 4. Bot のセットアップ
@@ -151,7 +220,8 @@ MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 # UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&ping=  # Uptime Kuma 死活監視（任意）
 ```
 
-主要なスピーカーID例：
+<details>
+<summary>主要なスピーカーID例（クリックで展開）</summary>
 
 | キャラクター | スタイル: ID |
 |---|---|
@@ -197,6 +267,8 @@ MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 | あんこもん | ノーマル: `113` / つよつよ: `114` / よわよわ: `115` / けだるげ: `116` / ささやき: `117` |
 
 > 💡 全スピーカー・スタイル一覧は `/myvoice list` または `http://<コンテナIP>:50021/speakers` で確認できます。
+
+</details>
 
 #### 6. systemd サービスの登録
 
@@ -256,40 +328,7 @@ journalctl -u yomiage-bot -f
 curl http://localhost:50021/version
 ```
 
----
-
-## セットアップ（ローカル・その他環境）
-
-### 1. VOICEVOX ENGINE の起動
-
-VOICEVOX ENGINE はGUIなしで動作するサーバーです。  
-[Releases](https://github.com/VOICEVOX/voicevox_engine/releases) から `linux-cpu.zip`（CPUのみの場合）をダウンロードして展開します。
-
-```bash
-./run --host 127.0.0.1 --port 50021
-```
-
----
-
-### 2. Bot のセットアップ
-
-```bash
-git clone https://github.com/warasugitewara/Waras-Yomiage-Bot.git
-cd Waras-Yomiage-Bot
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# .env を編集して DISCORD_TOKEN を設定
-```
-
----
-
-### 3. Bot の起動
-
-```bash
-source .venv/bin/activate
-python bot.py
-```
+</details>
 
 ---
 
@@ -343,7 +382,8 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | `!owner import_users` / `/owner import_users` | JSONファイルを添付してユーザーのボイス設定をインポート（デフォルト: マージ） |
 | `!owner import_users true` / `/owner import_users replace:True` | 既存設定を全置換してインポート |
 
-#### ユーザー設定 JSON フォーマット
+<details>
+<summary>ユーザー設定 JSON フォーマット</summary>
 
 ```json
 {
@@ -358,6 +398,8 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 - `user_id`: Discord ユーザーID（数字文字列）
 - `speaker_id`: VOICEVOX スピーカーID（整数）
 - インポート時に不正なエントリ（user_id が数字以外、speaker_id が整数以外）は自動スキップされます
+
+</details>
 
 ### チャンネル管理
 
@@ -380,7 +422,8 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | `!dict import` / `/dict import` | JSONファイルを添付して辞書をインポート（デフォルト: 既存にマージ） |
 | `!dict import true` / `/dict import replace:True` | 既存辞書を全置換してインポート |
 
-#### 辞書 JSON フォーマット
+<details>
+<summary>辞書 JSON フォーマット</summary>
 
 エクスポートされるファイル形式：
 
@@ -405,11 +448,13 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 
 > 💡 kuroneko TTS Bot の辞書エクスポートファイルをそのままインポートできます。
 
+</details>
+
 ---
 
 ## VC 参加時の動作
 
-- `/join` 実行時にボットは自動的に **スピーカーミュート（デフ）状態** で参加します  
+- `/join` 実行時にボットは自動的に **スピーカーミュート（デフ）状態** で参加します
   Discord UI でヘッドホンに × アイコンが表示され、ボットがマイク入力を一切受け取らないことがわかります
 - TTS の音声送信（読み上げ再生）はデフ状態でも問題なく動作します
 - VCに人間が **誰もいなくなってから5秒後** に自動退出します（Bot はカウント外）
@@ -426,14 +471,14 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | 🟡 **warning** | VOICEVOX 合成エラー・再生エラー・自動退出エラー・スラッシュコマンド同期エラー |
 | 🔴 **error** | 起動失敗・Cog 読み込み失敗・コマンドエラー・イベントハンドラ内例外 |
 
-同一通知は **30 秒以内に 1 回のみ送信**（スパム防止）。  
+同一通知は **30 秒以内に 1 回のみ送信**（スパム防止）。
 `ERROR_WEBHOOK_URL` が未設定の場合は通知機能ごと無効になります。
 
 ### Webhook URL の取得方法
 
 1. Discord サーバーの **チャンネル設定** → **連携サービス** → **ウェブフック**
 2. **新しいウェブフック** を作成し、URL をコピー
-3. `.env` に貼り付け：  
+3. `.env` に貼り付け：
    ```env
    ERROR_WEBHOOK_URL=https://discord.com/api/webhooks/xxxx/yyyy
    ```
@@ -481,6 +526,9 @@ UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&pi
 
 ## systemd 設定（自動起動）
 
+<details>
+<summary>クリックして展開（VOICEVOX ENGINE / Bot の systemd unit 定義）</summary>
+
 ### VOICEVOX ENGINE
 
 `/etc/systemd/system/voicevox.service`
@@ -526,15 +574,21 @@ WantedBy=multi-user.target
 systemctl enable --now voicevox yomiage-bot
 ```
 
+</details>
+
 ---
 
-### thanks for readimg
+## thanks for readimg
+
 - 「最近読み上げbotラグいなぁ」そうだ、自分で作れば良いんだ!! という所から始まりました。
 - 私は**満別花丸**を愛用しております。オススメです。
 
-## Super Extream Thanks
+### Super Extream Thanks
+
 [VOICEVOX読み上げbot](https://tts.krnk.org) 今回のbot作成の原因となったbot
+
+---
 
 ## ライセンス
 
-MIT
+[MIT](./LICENCE)
