@@ -39,6 +39,7 @@ class VoicevoxClient:
         *,
         timeout: float,
         retry_on_timeout: bool = True,
+        max_retries: int | None = None,
         **kwargs,
     ) -> bytes:
         """VOICEVOX への HTTP リクエスト。
@@ -46,19 +47,22 @@ class VoicevoxClient:
         LXC↔VM 間の瞬断や 5xx を吸収するため、接続エラー・サーバエラーは
         指数バックオフで最大 max_retries 回まで再試行する。タイムアウトは
         retry_on_timeout=False の呼び出し（長い synthesis 等）では再試行しない。
+        max_retries を明示すればインスタンス既定値を上書きする（health 用の
+        死活確認など、待たせたくない呼び出しで 0 を渡す）。
         失敗時は VoicevoxError を送出する。
         """
+        retries = self._max_retries if max_retries is None else max_retries
         session = await self._get_session()
         to = aiohttp.ClientTimeout(total=timeout)
         url = f"{self.base_url}{path}"
         last_exc: Exception | None = None
 
-        for attempt in range(self._max_retries + 1):
+        for attempt in range(retries + 1):
             try:
                 async with session.request(method, url, timeout=to, **kwargs) as resp:
                     if resp.status != 200:
                         # 5xx は一時的とみなして再試行、それ以外は即エラー
-                        if resp.status >= 500 and attempt < self._max_retries:
+                        if resp.status >= 500 and attempt < retries:
                             last_exc = VoicevoxError(f"{path} failed: HTTP {resp.status}")
                             await asyncio.sleep(self._retry_backoff * (2 ** attempt))
                             continue
@@ -66,14 +70,15 @@ class VoicevoxClient:
                     return await resp.read()
             except asyncio.TimeoutError as e:
                 last_exc = e
-                if retry_on_timeout and attempt < self._max_retries:
+                if retry_on_timeout and attempt < retries:
                     await asyncio.sleep(self._retry_backoff * (2 ** attempt))
                     continue
                 raise VoicevoxError(f"VOICEVOX ENGINE がタイムアウトしました（{path}）") from e
-            except aiohttp.ClientConnectionError as e:
-                # ServerDisconnectedError 等もここで捕捉される
+            except aiohttp.ClientError as e:
+                # ClientConnectionError（ServerDisconnectedError 等）に加え、
+                # 受信途中の ClientPayloadError 等もここで捕捉して再試行する
                 last_exc = e
-                if attempt < self._max_retries:
+                if attempt < retries:
                     await asyncio.sleep(self._retry_backoff * (2 ** attempt))
                     continue
                 raise VoicevoxError(
@@ -92,7 +97,10 @@ class VoicevoxClient:
             params={"text": text, "speaker": speaker},
             timeout=10,
         )
-        query = json.loads(raw)
+        try:
+            query = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise VoicevoxError(f"VOICEVOX の応答が不正です（/audio_query）: {e}") from e
 
         # 速度を上書き
         query["speedScale"] = speed
@@ -110,4 +118,22 @@ class VoicevoxClient:
     async def get_speakers(self) -> list[dict]:
         """利用可能なスピーカー一覧を返す"""
         raw = await self._request("GET", "/speakers", timeout=10)
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise VoicevoxError(f"VOICEVOX の応答が不正です（/speakers）: {e}") from e
+
+    async def version(self) -> str:
+        """VOICEVOX ENGINE のバージョン文字列を返す（死活確認用）。
+
+        health チェックから呼ばれるため、リトライせず短いタイムアウトで
+        一度だけ確認する。不正応答は synthesis / get_speakers と同様に
+        VoicevoxError にし、「読めたが内容が怪しい」状態を正常扱いにしない
+        （リバースプロキシの 200 HTML などを緑表示にしないため）。
+        """
+        raw = await self._request("GET", "/version", timeout=3, max_retries=0)
+        try:
+            # /version は JSON 文字列（例: "0.14.0"）を返す
+            return str(json.loads(raw))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise VoicevoxError(f"VOICEVOX の応答が不正です（/version）: {e}") from e
