@@ -25,17 +25,24 @@ async def _wav_to_pcm(wav_bytes: bytes) -> bytes:
     """VOICEVOX出力WAV(24kHz mono)をDiscord用PCM(48kHz stereo s16le)に変換する。
     変換はsynthesizerタスク内で1回だけ実行し、結果をキャッシュする。
     playerタスクはdiscord.PCMAudioで直接再生するためFFmpegプロセスを起動しない。
+
+    ffmpeg が異常終了した場合や出力が空の場合は RuntimeError を送出する。
+    これを怠ると空の PCM がキャッシュに保存され、同じテキストが以後ずっと
+    無音再生になってしまう。
     """
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg", "-i", "pipe:0",
         "-f", "s16le", "-ar", "48000", "-ac", "2",
         "-threads", "1",
-        "-loglevel", "quiet", "pipe:1",
+        "-loglevel", "error", "pipe:1",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
-    pcm, _ = await proc.communicate(wav_bytes)
+    pcm, stderr = await proc.communicate(wav_bytes)
+    if proc.returncode != 0 or not pcm:
+        detail = stderr.decode("utf-8", errors="replace").strip() or "出力が空です"
+        raise RuntimeError(f"ffmpeg 変換に失敗しました（code={proc.returncode}）: {detail}")
     return pcm
 
 

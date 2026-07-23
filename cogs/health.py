@@ -48,6 +48,23 @@ async def _collect_metrics() -> dict:
     }
 
 
+async def _probe_voicevox(bot: commands.Bot) -> str | None:
+    """TTS Cog の VoicevoxClient を借りて ENGINE の死活を確認する。
+    成功: "✅ vX.Y.Z / 12 ms"、失敗: "❌ 接続不可"。TTS 未ロード時は None。
+    """
+    tts = bot.get_cog("TTS")
+    client = getattr(tts, "voicevox", None)
+    if client is None:
+        return None
+    t0 = time.perf_counter()
+    try:
+        version = await client.version()
+    except Exception:
+        return "❌ 接続不可"
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    return f"✅ `v{version}` / `{elapsed_ms:.0f} ms`"
+
+
 class Health(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -59,6 +76,7 @@ class Health(commands.Cog):
 
         t0 = time.perf_counter()
         metrics = await _collect_metrics()
+        voicevox_status = await _probe_voicevox(self.bot)
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
         prefix = os.getenv("PREFIX", "!")
@@ -115,6 +133,12 @@ class Health(commands.Cog):
             ),
             inline=True,
         )
+        if voicevox_status is not None:
+            embed.add_field(
+                name="🎤 VOICEVOX ENGINE",
+                value=voicevox_status,
+                inline=True,
+            )
         embed.set_footer(text=f"計測時間: {elapsed_ms:.0f} ms")
 
         await ctx.reply(embed=embed)

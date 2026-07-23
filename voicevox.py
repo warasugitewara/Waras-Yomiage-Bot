@@ -70,8 +70,9 @@ class VoicevoxClient:
                     await asyncio.sleep(self._retry_backoff * (2 ** attempt))
                     continue
                 raise VoicevoxError(f"VOICEVOX ENGINE がタイムアウトしました（{path}）") from e
-            except aiohttp.ClientConnectionError as e:
-                # ServerDisconnectedError 等もここで捕捉される
+            except aiohttp.ClientError as e:
+                # ClientConnectionError（ServerDisconnectedError 等）に加え、
+                # 受信途中の ClientPayloadError 等もここで捕捉して再試行する
                 last_exc = e
                 if attempt < self._max_retries:
                     await asyncio.sleep(self._retry_backoff * (2 ** attempt))
@@ -92,7 +93,10 @@ class VoicevoxClient:
             params={"text": text, "speaker": speaker},
             timeout=10,
         )
-        query = json.loads(raw)
+        try:
+            query = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise VoicevoxError(f"VOICEVOX の応答が不正です（/audio_query）: {e}") from e
 
         # 速度を上書き
         query["speedScale"] = speed
@@ -110,4 +114,17 @@ class VoicevoxClient:
     async def get_speakers(self) -> list[dict]:
         """利用可能なスピーカー一覧を返す"""
         raw = await self._request("GET", "/speakers", timeout=10)
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise VoicevoxError(f"VOICEVOX の応答が不正です（/speakers）: {e}") from e
+
+    async def version(self) -> str:
+        """VOICEVOX ENGINE のバージョン文字列を返す（死活確認用）"""
+        raw = await self._request("GET", "/version", timeout=5)
+        try:
+            # /version は JSON 文字列（例: "0.14.0"）を返す
+            return str(json.loads(raw))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # 念のため素のテキストにフォールバック
+            return raw.decode("utf-8", errors="replace").strip().strip('"')
