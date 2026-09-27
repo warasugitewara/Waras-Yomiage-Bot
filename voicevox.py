@@ -104,6 +104,9 @@ class VoicevoxClient:
 
         # 速度を上書き
         query["speedScale"] = speed
+        # Discord の PCM 形式（48kHz stereo）で直接出力させ、Bot 側のリサンプリングを省く
+        query["outputSamplingRate"] = 48000
+        query["outputStereo"] = True
 
         # Step 2: synthesis（長時間。タイムアウトは再試行せずキュー詰まりを防ぐ）
         return await self._request(

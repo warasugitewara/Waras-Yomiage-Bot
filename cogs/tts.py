@@ -3,6 +3,7 @@
 import asyncio
 import collections
 import io
+import wave
 import json
 import os
 from dataclasses import dataclass
@@ -40,8 +41,24 @@ def _validate_dict_entry(word: str, reading: str) -> str | None:
     return None
 
 
+def _extract_discord_pcm(wav_bytes: bytes) -> bytes | None:
+    """WAV が既に Discord 形式（48kHz stereo s16le 非圧縮）ならヘッダを除いた PCM を返す。
+    形式が異なる・解析できない・空の場合は None（FFmpeg 変換へフォールバック）。
+    """
+    try:
+        with wave.open(io.BytesIO(wav_bytes), "rb") as w:
+            if (w.getframerate(), w.getnchannels(), w.getsampwidth(), w.getcomptype()) != (48000, 2, 2, "NONE"):
+                return None
+            pcm = w.readframes(w.getnframes())
+    except (wave.Error, EOFError):
+        return None
+    return pcm or None
+
+
 async def _wav_to_pcm(wav_bytes: bytes) -> bytes:
-    """VOICEVOX出力WAV(24kHz mono)をDiscord用PCM(48kHz stereo s16le)に変換する。
+    """VOICEVOX出力WAVをDiscord用PCM(48kHz stereo s16le)に変換する。
+    VOICEVOX に 48kHz stereo を指定しているため通常はヘッダ除去のみで済む。
+    それ以外の形式（旧エンジン等）の場合のみ FFmpeg で変換する。
     変換はsynthesizerタスク内で1回だけ実行し、結果をキャッシュする。
     playerタスクはdiscord.PCMAudioで直接再生するためFFmpegプロセスを起動しない。
 
@@ -49,6 +66,10 @@ async def _wav_to_pcm(wav_bytes: bytes) -> bytes:
     これを怠ると空の PCM がキャッシュに保存され、同じテキストが以後ずっと
     無音再生になってしまう。
     """
+    pcm = _extract_discord_pcm(wav_bytes)
+    if pcm is not None:
+        return pcm
+
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg", "-i", "pipe:0",
         "-f", "s16le", "-ar", "48000", "-ac", "2",
