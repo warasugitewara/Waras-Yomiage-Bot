@@ -373,10 +373,16 @@ class TTS(commands.Cog):
             speaker_id=self.default_speaker,
             speed=self._guild_speed(guild_id),
         )
+        self._enqueue_item(guild_id, item)
+
+    def _enqueue_item(self, guild_id: int, item: TTSItem):
+        """メッセージキューに積む（満杯なら最古を捨てる）"""
         q = self._get_queue(guild_id)
         if q.full():
             try:
                 q.get_nowait()
+                # 捨てた要素も処理済みとして数え、未完了カウンタのずれを防ぐ
+                q.task_done()
             except asyncio.QueueEmpty:
                 pass
         q.put_nowait(item)
@@ -952,14 +958,7 @@ class TTS(commands.Cog):
             speaker_id=self.user_voice.get(message.author.id),
             speed=self._guild_speed(message.guild.id),
         )
-        queue = self._get_queue(message.guild.id)
-        if queue.full():
-            try:
-                queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-        queue.put_nowait(item)
-        self._ensure_worker(message.guild.id)
+        self._enqueue_item(message.guild.id, item)
 
     # ------------------------------------------------------------------ #
     # Admin commands

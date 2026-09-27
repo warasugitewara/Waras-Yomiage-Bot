@@ -115,3 +115,19 @@ async def test_unload_cancels_shared_synthesis(cog: TTS, monkeypatch: pytest.Mon
 
     await asyncio.wait_for(cog.cog_unload(), timeout=1.0)
     assert not cog._in_flight
+
+
+async def test_dropping_oldest_keeps_unfinished_count(cog: TTS, monkeypatch: pytest.MonkeyPatch) -> None:
+    """満杯時に最古を捨てても未完了カウンタがずれず join が完了すること"""
+    monkeypatch.setattr(cog, "_ensure_worker", lambda _gid: None)
+    q = cog._get_queue(1)
+    for i in range(q.maxsize + 1):
+        cog._enqueue_item(1, TTSItem(text=str(i), speaker_id=3, speed=1.0))
+
+    assert q.qsize() == q.maxsize
+    assert q.get_nowait().text == "1"  # 最古の "0" が捨てられている
+    q.task_done()
+    while not q.empty():
+        q.get_nowait()
+        q.task_done()
+    await asyncio.wait_for(q.join(), timeout=1.0)
