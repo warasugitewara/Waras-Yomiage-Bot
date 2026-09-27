@@ -24,6 +24,9 @@ _DISCORD_MAX = 1900
 _PCM_CACHE_MAX = 100
 _PCM_CACHE_MAX_BYTES = 64 * 1024 * 1024
 
+# VOICEVOX への同時合成リクエスト数（ギルド数が増えてもエンジン VM を過負荷にしない）
+_SYNTH_CONCURRENCY = 2
+
 # 読み替え辞書の上限（巨大入力による負荷・メモリ消費を防ぐ）
 _DICT_IMPORT_MAX_BYTES = 1024 * 1024
 _DICT_MAX_ENTRIES = 5000
@@ -139,6 +142,7 @@ class TTS(commands.Cog):
         # Task はどのギルドのワーカーにも所有されないため、/leave でワーカーが
         # キャンセルされても合成は継続し、他ギルドの待機が停止しない
         self._in_flight: dict[tuple, asyncio.Task[bytes]] = {}
+        self._synth_sem = asyncio.Semaphore(_SYNTH_CONCURRENCY)
 
         # ウォームアップ Task の参照（GC による途中消失を防ぎ、unload 時にキャンセルする）
         self._warmup_task: asyncio.Task[None] | None = None
@@ -297,7 +301,8 @@ class TTS(commands.Cog):
 
     async def _synthesize_pcm(self, cache_key: tuple, item: TTSItem) -> bytes:
         """VOICEVOX 合成 → PCM 変換し、キャッシュへ保存して返す"""
-        wav_bytes = await self.voicevox.synthesis(item.text, item.speaker_id, item.speed)
+        async with self._synth_sem:
+            wav_bytes = await self.voicevox.synthesis(item.text, item.speaker_id, item.speed)
         pcm_bytes = await _wav_to_pcm(wav_bytes)
         # キャッシュ更新（VC切断に関わらず次回のために保存）
         self._cache_put(cache_key, pcm_bytes)

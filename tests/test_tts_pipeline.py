@@ -148,3 +148,25 @@ def test_pcm_cache_is_bounded_by_bytes(cog: TTS, monkeypatch: pytest.MonkeyPatch
     cog._cache_put(("big",), b"x" * 11)  # 単体で上限超過はキャッシュしない
     assert ("big",) not in cog._pcm_cache
     assert cog._pcm_cache_bytes == 6
+
+
+async def test_synthesis_concurrency_is_limited(cog: TTS, monkeypatch: pytest.MonkeyPatch) -> None:
+    running = 0
+    peak = 0
+
+    async def fake_synthesis(text: str, speaker: int, speed: float) -> bytes:
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+        return b"wav"
+
+    monkeypatch.setattr(cog.voicevox, "synthesis", fake_synthesis)
+    tasks = [
+        cog._get_or_start_synthesis((str(i), 3, 1.0), TTSItem(text=str(i), speaker_id=3, speed=1.0))
+        for i in range(6)
+    ]
+    await asyncio.wait_for(asyncio.gather(*tasks), timeout=1.0)
+    assert peak == tts_mod._SYNTH_CONCURRENCY
+    await cog.cog_unload()
