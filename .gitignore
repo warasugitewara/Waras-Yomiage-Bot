@@ -21,6 +21,11 @@ env/
 
 # Data (runtime generated)
 data/*.json
+data/*.bak[0-9]
+data/*.tmp
+
+# Test
+.pytest_cache/
 
 # Logs
 *.log
