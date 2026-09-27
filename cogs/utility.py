@@ -7,7 +7,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-_VERSION = "1.0.0"
+from version import VERSION
+
 _REPO_URL = "https://github.com/warasugitewara/Waras-Yomiage-Bot"
 _VOICEVOX_TERM_URL = "https://voicevox.hiroshiba.jp/term/"
 
@@ -86,7 +87,7 @@ class Utility(commands.Cog):
             url=_REPO_URL,
         )
 
-        embed.add_field(name="🏷️ バージョン",    value=_VERSION,                       inline=True)
+        embed.add_field(name="🏷️ バージョン",    value=VERSION,                       inline=True)
         embed.add_field(name="⌨️ プレフィックス", value=f"`{prefix}`",                  inline=True)
         embed.add_field(name="📡 WebSocket",     value=f"`{ws_ms} ms`",                inline=True)
 

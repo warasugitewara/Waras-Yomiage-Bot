@@ -7,6 +7,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from discord_helpers import send_response
+
 
 class Owner(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -28,13 +30,7 @@ class Owner(commands.Cog):
         else:
             return True
 
-        if isinstance(ctx_or_inter, discord.Interaction):
-            if ctx_or_inter.response.is_done():
-                await ctx_or_inter.followup.send(msg, ephemeral=True)
-            else:
-                await ctx_or_inter.response.send_message(msg, ephemeral=True)
-        else:
-            await ctx_or_inter.send(msg)
+        await send_response(ctx_or_inter, msg, ephemeral=True)
         return False
 
     # ── prefix コマンドグループ ────────────────────────────────────────────
@@ -159,13 +155,7 @@ class Owner(commands.Cog):
         return None
 
     async def _send(self, ctx_or_inter, msg: str):
-        if isinstance(ctx_or_inter, discord.Interaction):
-            if ctx_or_inter.response.is_done():
-                await ctx_or_inter.followup.send(msg, ephemeral=True)
-            else:
-                await ctx_or_inter.response.send_message(msg, ephemeral=True)
-        else:
-            await ctx_or_inter.send(msg)
+        await send_response(ctx_or_inter, msg, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

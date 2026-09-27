@@ -3,6 +3,7 @@
 import asyncio
 import collections
 import io
+import json
 import os
 from dataclasses import dataclass
 
@@ -11,6 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from channel_store import ChannelStore, WordDict
+from discord_helpers import send_response
 from text_filter import filter_message
 from voicevox import VoicevoxClient, VoicevoxError
 
@@ -442,14 +444,7 @@ class TTS(commands.Cog):
             await ctx_or_inter.typing()
 
     async def _send(self, ctx_or_inter, msg: str, ephemeral: bool = False):
-        """Context / Interaction 両対応の送信ヘルパー"""
-        if isinstance(ctx_or_inter, discord.Interaction):
-            if ctx_or_inter.response.is_done():
-                await ctx_or_inter.followup.send(msg, ephemeral=ephemeral)
-            else:
-                await ctx_or_inter.response.send_message(msg, ephemeral=ephemeral)
-        else:
-            await ctx_or_inter.send(msg)
+        await send_response(ctx_or_inter, msg, ephemeral=ephemeral)
 
     async def _send_chunks(self, ctx_or_inter, text: str, ephemeral: bool = False):
         """長いテキストを _DISCORD_MAX 文字以内に分割して送信"""
@@ -484,7 +479,7 @@ class TTS(commands.Cog):
             await ctx.send(f"⚠️ 予期しないエラーが発生しました: {e}")
             return
 
-        added = self.channel_store.add(ctx.guild.id, ctx.channel.id)
+        self.channel_store.add(ctx.guild.id, ctx.channel.id)
 
         if joined:
             self._enqueue_announce(ctx.guild.id, "接続しました")
@@ -783,15 +778,13 @@ class TTS(commands.Cog):
         await self._dict_export(inter)
 
     async def _dict_export(self, ctx_or_inter):
-        import io as _io
-        import json as _json
         guild_id = ctx_or_inter.guild.id
         d = self.word_dict.export_dict(guild_id)
         payload = {
             "version": 1,
             "data": [{"word": w, "reading": r} for w, r in d.items()],
         }
-        buf = _io.BytesIO(_json.dumps(payload, ensure_ascii=False, indent=2).encode())
+        buf = io.BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode())
         buf.seek(0)
         file = discord.File(buf, filename=f"dict_{guild_id}.json")
         if isinstance(ctx_or_inter, discord.Interaction):
@@ -824,7 +817,6 @@ class TTS(commands.Cog):
         await self._dict_import(inter, file, replace)
 
     async def _dict_import(self, ctx_or_inter, attachment: discord.Attachment, replace: bool):
-        import json as _json
         if not attachment.filename.endswith(".json"):
             await self._send(ctx_or_inter, "⚠️ `.json` ファイルのみ対応しています。")
             return
@@ -837,7 +829,7 @@ class TTS(commands.Cog):
             return
         try:
             raw_bytes = await attachment.read()
-            data = _json.loads(raw_bytes.decode("utf-8"))
+            data = json.loads(raw_bytes.decode("utf-8"))
         except Exception:
             await self._send(ctx_or_inter, "⚠️ JSONの読み込みに失敗しました。ファイルが正しいか確認してください。")
             return

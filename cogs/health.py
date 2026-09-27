@@ -11,7 +11,7 @@ import psutil
 from discord import app_commands
 from discord.ext import commands
 
-_VERSION = "1.0.0"
+from version import VERSION
 
 
 def _fmt_bytes(n: float) -> str:
@@ -98,7 +98,7 @@ class Health(commands.Cog):
         embed.add_field(
             name="🤖 Bot",
             value=(
-                f"**バージョン** `v{_VERSION}`\n"
+                f"**バージョン** `v{VERSION}`\n"
                 f"**Prefix** `{prefix}` | `/`\n"
                 f"**discord.py** `{discord.__version__}`"
             ),
