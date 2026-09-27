@@ -72,7 +72,13 @@ class Health(commands.Cog):
     @commands.hybrid_command(name="health", description="Botのシステム状態を表示します")
     async def health(self, ctx: commands.Context):
         """Bot のバージョン・応答速度・サーバー数・メモリ・CPU・ネットワークを表示します。"""
-        await ctx.defer()
+        # ホストのリソース情報を含むためオーナー限定（OWNER_IDS 未設定時は誰も使えない）
+        owner_ids: frozenset[int] = getattr(self.bot, "owner_ids", frozenset())
+        if ctx.author.id not in owner_ids:
+            await ctx.send("⛔ このコマンドはオーナーのみ使用できます。", ephemeral=True)
+            return
+
+        await ctx.defer(ephemeral=True)
 
         t0 = time.perf_counter()
         metrics = await _collect_metrics()
@@ -141,7 +147,7 @@ class Health(commands.Cog):
             )
         embed.set_footer(text=f"計測時間: {elapsed_ms:.0f} ms")
 
-        await ctx.reply(embed=embed)
+        await ctx.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

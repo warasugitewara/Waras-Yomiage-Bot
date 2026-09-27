@@ -9,6 +9,7 @@ from discord.ext import commands
 
 _VERSION = "1.0.0"
 _REPO_URL = "https://github.com/warasugitewara/Waras-Yomiage-Bot"
+_VOICEVOX_TERM_URL = "https://voicevox.hiroshiba.jp/term/"
 
 # カテゴリーごとのコマンド一覧
 _HELP_DATA = [
@@ -65,7 +66,6 @@ class Utility(commands.Cog):
     async def about(self, ctx: commands.Context):
         await ctx.defer()
         prefix = os.getenv("PREFIX", "!")
-        voicevox_url = os.getenv("VOICEVOX_URL", "http://localhost:50021")
         default_speaker = os.getenv("DEFAULT_SPEAKER", "3")
         default_speed = os.getenv("DEFAULT_SPEED", "1.0")
         max_length = os.getenv("MAX_TEXT_LENGTH", "100")
@@ -97,7 +97,6 @@ class Utility(commands.Cog):
         embed.add_field(
             name="🎤 VOICEVOX ENGINE",
             value=(
-                f"URL: `{voicevox_url}`\n"
                 f"デフォルトスピーカーID: `{default_speaker}`\n"
                 f"デフォルト速度: `{default_speed}x`\n"
                 f"最大読み上げ文字数: `{max_length}文字`"
@@ -114,6 +113,16 @@ class Utility(commands.Cog):
                 "• 読み替え辞書\n"
                 "• パイプライン合成（次メッセージを先読み）\n"
                 "• prefix & slash コマンド両対応"
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="📜 音声クレジット",
+            value=(
+                "VOICEVOX:ずんだもん ほか各キャラクター\n"
+                "（使用中のボイスは `/myvoice info` で確認）\n"
+                f"[VOICEVOX 利用規約]({_VOICEVOX_TERM_URL})・各キャラクターの利用規約に従ってご利用ください"
             ),
             inline=False,
         )

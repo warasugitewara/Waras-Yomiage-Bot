@@ -387,6 +387,13 @@ class TTS(commands.Cog):
         entry = self._speaker_id_map.get(speaker_id)
         return f"{entry[0]} / {entry[1]}" if entry else None
 
+    async def _resolve_credit(self, speaker_id: int) -> str | None:
+        """speaker_id から VOICEVOX のクレジット表記（例: VOICEVOX:ずんだもん）を返す"""
+        if not await self._ensure_speakers_cache() or self._speaker_id_map is None:
+            return None
+        entry = self._speaker_id_map.get(speaker_id)
+        return f"VOICEVOX:{entry[0]}" if entry else None
+
     async def _defer(self, ctx_or_inter, ephemeral: bool = False):
         """slash/prefix 両対応の defer。prefix では typing を表示するだけ"""
         if isinstance(ctx_or_inter, discord.Interaction):
@@ -524,7 +531,11 @@ class TTS(commands.Cog):
             else ctx_or_inter.user.id
         )
         self.user_voice.set(user_id, speaker_id)
-        await self._send(ctx_or_inter, f"🎤 あなたのボイスを ID `{speaker_id}` に設定しました。")
+        msg = f"🎤 あなたのボイスを ID `{speaker_id}` に設定しました。"
+        credit = await self._resolve_credit(speaker_id)
+        if credit:
+            msg += f"\n📜 クレジット: `{credit}`（キャラクターの利用規約に従ってご利用ください）"
+        await self._send(ctx_or_inter, msg)
 
     # --- reset ---
 
@@ -568,7 +579,11 @@ class TTS(commands.Cog):
         speaker_id = self.user_voice.get(user_id)
         name = await self._resolve_speaker_name(speaker_id)
         label = f"`{name}`" if name else f"ID `{speaker_id}`"
-        await self._send(ctx_or_inter, f"🎤 現在のボイス: {label} (ID: `{speaker_id}`)", ephemeral=True)
+        msg = f"🎤 現在のボイス: {label} (ID: `{speaker_id}`)"
+        credit = await self._resolve_credit(speaker_id)
+        if credit:
+            msg += f"\n📜 クレジット: `{credit}`"
+        await self._send(ctx_or_inter, msg, ephemeral=True)
 
     # --- list ---
 
