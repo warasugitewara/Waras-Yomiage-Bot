@@ -40,6 +40,8 @@ VOICEVOX を使った **ローカル完結型** の Discord 読み上げ (TTS) B
 - [Uptime Kuma 監視（オプション）](#uptime-kuma)
 - [メッセージの前処理](#preprocessing)
 - [systemd 設定（自動起動）](#systemd-config)
+- [クレジット・利用規約](#credits)
+- [データの取り扱い](#data-handling)
 - [ライセンス](#license)
 
 > 💡 GitHub公式アプリなど一部のビューアでは、上記のページ内リンクが正しく動作しない場合があります。その場合はブラウザ（Safari/Chromeなど）で開いてご覧ください。
@@ -222,7 +224,7 @@ DEFAULT_SPEED=1.0                    # 読み上げ速度（0.5〜2.0）
 MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 # GUILD_ID=123456789012345678        # スラッシュコマンドをギルド限定で即時同期（任意）
 # ERROR_WEBHOOK_URL=https://discord.com/api/webhooks/...  # Webhook 通知（任意）
-# OWNER_IDS=811515262238064640       # オーナーユーザーID（カンマ区切りで複数可）（任意）
+# OWNER_IDS=123456789012345678       # オーナーユーザーID（カンマ区切りで複数可）（任意）
 # BOT_STATUS=online                  # ステータス: online / idle / dnd / invisible（任意）
 # HEALTH_ENABLED=true                # /health コマンドを有効化（デフォルト: 無効）
 # UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&ping=  # Uptime Kuma 死活監視（任意）
@@ -399,7 +401,7 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 {
   "version": 1,
   "data": [
-    { "user_id": "811515262238064640", "speaker_id": 46 },
+    { "user_id": "123456789012345678", "speaker_id": 46 },
     { "user_id": "987654321098765432", "speaker_id": 3  }
   ]
 }
@@ -606,6 +608,42 @@ systemctl enable --now voicevox yomiage-bot
 ### Super Extream Thanks
 
 [VOICEVOX読み上げbot](https://tts.krnk.org) 今回のbot作成の原因となったbot
+
+---
+
+<a id="credits"></a>
+
+## クレジット・利用規約
+
+本 Bot の音声は [VOICEVOX](https://voicevox.hiroshiba.jp/) で合成しています。
+
+**音声クレジット:** `VOICEVOX:ずんだもん`（デフォルトボイス）
+
+ユーザーが `/myvoice set` で別のキャラクターを選択した場合、そのキャラクターの音声が使用されます（例: `VOICEVOX:四国めたん`）。
+
+- Bot を運用・利用する際は [VOICEVOX 利用規約](https://voicevox.hiroshiba.jp/term/) に加え、**使用する各キャラクター（音声ライブラリ）の利用規約** に従ってください。規約はキャラクターごとに異なります（各キャラクターの規約は [VOICEVOX 公式サイト](https://voicevox.hiroshiba.jp/) の各キャラクターページから確認できます）。
+- 例: ずんだもん・四国めたん等は [東北ずん子・ずんだもんプロジェクト 音源利用規約](https://zunko.jp/con_ongen_kiyaku.html) が適用され、政治・宗教活動、虚偽情報の拡散目的などでの利用が禁止されています。
+- 読み上げ内容はユーザーが投稿したテキストに依存します。Bot を導入するサーバーの管理者は、利用者にも上記規約の遵守を求めてください。
+- 本リポジトリは VOICEVOX ENGINE を同梱・再配布しません。ENGINE は [公式リリース](https://github.com/VOICEVOX/voicevox_engine/releases) から各自で取得してください。
+
+---
+
+<a id="data-handling"></a>
+
+## データの取り扱い
+
+本 Bot は読み上げのために、Discord の Message Content Intent を使用してメッセージ本文を取得します。
+
+| データ | 保存先 | 内容 | 削除方法 |
+|---|---|---|---|
+| ボイス設定 | `data/users.json` | ユーザーID → スピーカーID | `/myvoice reset` |
+| 読み上げチャンネル | `data/channels.json` | サーバーID → チャンネルID | `/listen remove` または `/leave` |
+| 読み替え辞書 | `data/dict.json` | サーバーID → 単語・読み | `/dict remove` |
+
+- **メッセージ本文はディスクに保存しません。** 合成済み音声はメモリ上に一時キャッシュされ（最大100件）、Bot の再起動で消去されます。
+- `ERROR_WEBHOOK_URL` を設定した場合、エラー通知にサーバー名・ユーザー名・コマンド名が含まれ、指定した Webhook に送信されます。
+- 各 `data/*.json` には直近3世代のバックアップ（`.bak1`〜`.bak3`）が作成されます。
+- 保存データは Bot を運用するホスト内にのみ保持され、第三者へ提供しません。
 
 ---
 
