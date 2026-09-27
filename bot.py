@@ -44,6 +44,9 @@ class YomiageBot(commands.Bot):
         # バックグラウンドタスクの参照を保持（GC による途中消失を防ぎ、終了時にキャンセルする）
         self._kuma_task: asyncio.Task[None] | None = None
 
+        # on_ready は再接続（セッション再確立）のたびに呼ばれるため、起動通知は初回のみ
+        self._startup_notified = False
+
     async def setup_hook(self):
         # Cog 読み込み
         try:
@@ -97,6 +100,10 @@ class YomiageBot(commands.Bot):
                 name=f"{PREFIX}join | /join",
             ),
         )
+        if self._startup_notified:
+            print("[Bot] 再接続しました（起動通知は送信済み）")
+            return
+        self._startup_notified = True
         await self.webhook.send(
             "info",
             "Bot 起動",
