@@ -20,8 +20,9 @@ from voicevox import VoicevoxClient, VoicevoxError
 # Discord メッセージの安全な最大文字数
 _DISCORD_MAX = 1900
 
-# PCM キャッシュの最大エントリ数（WAV→PCM変換済みバイト列）
+# PCM キャッシュの上限（48kHz stereo s16le は 1秒あたり約 192KB）
 _PCM_CACHE_MAX = 100
+_PCM_CACHE_MAX_BYTES = 64 * 1024 * 1024
 
 # 読み替え辞書の上限（巨大入力による負荷・メモリ消費を防ぐ）
 _DICT_IMPORT_MAX_BYTES = 1024 * 1024
@@ -131,6 +132,7 @@ class TTS(commands.Cog):
         # PCM LRU キャッシュ (text, speaker_id, speed) → 48kHz stereo s16le bytes
         # キャッシュヒット時はFFmpeg変換・VOICEVOX合成いずれも省略
         self._pcm_cache: collections.OrderedDict[tuple, bytes] = collections.OrderedDict()
+        self._pcm_cache_bytes = 0
 
         # in-flight dedup: 合成中キーを共有 Task で管理（ギルド横断共有）
         # 同じ (text, speaker_id, speed) が既に合成中なら Task を shield して待つ。
@@ -186,7 +188,7 @@ class TTS(commands.Cog):
         try:
             wav = await self.voicevox.synthesis("接続しました", self.default_speaker, self.default_speed)
             pcm = await _wav_to_pcm(wav)
-            self._pcm_cache[key] = pcm
+            self._cache_put(key, pcm)
             print("[TTS] VOICEVOXウォームアップ完了（「接続しました」をキャッシュ）")
         except Exception as e:
             print(f"[TTS] VOICEVOXウォームアップ失敗（起動直後は正常）: {e}")
@@ -298,11 +300,24 @@ class TTS(commands.Cog):
         wav_bytes = await self.voicevox.synthesis(item.text, item.speaker_id, item.speed)
         pcm_bytes = await _wav_to_pcm(wav_bytes)
         # キャッシュ更新（VC切断に関わらず次回のために保存）
-        self._pcm_cache[cache_key] = pcm_bytes
-        self._pcm_cache.move_to_end(cache_key)
-        if len(self._pcm_cache) > _PCM_CACHE_MAX:
-            self._pcm_cache.popitem(last=False)
+        self._cache_put(cache_key, pcm_bytes)
         return pcm_bytes
+
+    def _cache_put(self, key: tuple, pcm: bytes) -> None:
+        """PCM を LRU キャッシュに保存し、件数・合計バイト数の上限まで古い順に破棄する"""
+        old = self._pcm_cache.pop(key, None)
+        if old is not None:
+            self._pcm_cache_bytes -= len(old)
+        if len(pcm) > _PCM_CACHE_MAX_BYTES:
+            return  # 単体で上限を超える音声はキャッシュしない
+        self._pcm_cache[key] = pcm
+        self._pcm_cache_bytes += len(pcm)
+        while (
+            len(self._pcm_cache) > _PCM_CACHE_MAX
+            or self._pcm_cache_bytes > _PCM_CACHE_MAX_BYTES
+        ):
+            _, evicted = self._pcm_cache.popitem(last=False)
+            self._pcm_cache_bytes -= len(evicted)
 
     async def _synthesizer(self, guild_id: int):
         """メッセージキューからTTSItemを取り出し、PCMに変換してPCMキューに積む"""

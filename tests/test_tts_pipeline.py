@@ -131,3 +131,20 @@ async def test_dropping_oldest_keeps_unfinished_count(cog: TTS, monkeypatch: pyt
         q.get_nowait()
         q.task_done()
     await asyncio.wait_for(q.join(), timeout=1.0)
+
+
+def test_pcm_cache_is_bounded_by_bytes(cog: TTS, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tts_mod, "_PCM_CACHE_MAX_BYTES", 10)
+    cog._cache_put(("a",), b"1234")
+    cog._cache_put(("b",), b"1234")
+    cog._cache_put(("c",), b"1234")  # 合計 12 > 10 で最古の a を破棄
+    assert list(cog._pcm_cache) == [("b",), ("c",)]
+    assert cog._pcm_cache_bytes == 8
+
+    cog._cache_put(("b",), b"12")  # 上書き時は旧サイズを差し引く
+    assert cog._pcm_cache_bytes == 6
+    assert list(cog._pcm_cache) == [("c",), ("b",)]
+
+    cog._cache_put(("big",), b"x" * 11)  # 単体で上限超過はキャッシュしない
+    assert ("big",) not in cog._pcm_cache
+    assert cog._pcm_cache_bytes == 6
