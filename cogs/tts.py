@@ -7,6 +7,7 @@ import wave
 import json
 import os
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
@@ -16,6 +17,9 @@ from channel_store import ChannelStore, WordDict
 from discord_helpers import send_response
 from text_filter import filter_message
 from voicevox import VoicevoxClient, VoicevoxError
+
+if TYPE_CHECKING:
+    from bot import YomiageBot
 
 # Discord メッセージの安全な最大文字数
 _DISCORD_MAX = 1900
@@ -59,6 +63,20 @@ def _extract_discord_pcm(wav_bytes: bytes) -> bytes | None:
     return pcm or None
 
 
+def _require_guild(ctx_or_inter: commands.Context | discord.Interaction) -> discord.Guild:
+    """ギルド必須コマンド用。DM は cog_check / interaction_check で弾かれるため通常は到達しない"""
+    guild = ctx_or_inter.guild
+    if guild is None:
+        raise commands.NoPrivateMessage()
+    return guild
+
+
+def _voice_client(guild: discord.Guild) -> discord.VoiceClient | None:
+    """guild.voice_client は VoiceProtocol 型のため VoiceClient に絞り込んで返す"""
+    vc = guild.voice_client
+    return vc if isinstance(vc, discord.VoiceClient) else None
+
+
 async def _wav_to_pcm(wav_bytes: bytes) -> bytes:
     """VOICEVOX出力WAVをDiscord用PCM(48kHz stereo s16le)に変換する。
     VOICEVOX に 48kHz stereo を指定しているため通常はヘッダ除去のみで済む。
@@ -99,7 +117,7 @@ class TTSItem:
 
 
 class TTS(commands.Cog):
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: "YomiageBot"):
         self.bot = bot
         self.voicevox = VoicevoxClient(os.getenv("VOICEVOX_URL", "http://localhost:50021"))
         self.channel_store = ChannelStore()
@@ -146,6 +164,17 @@ class TTS(commands.Cog):
 
         # ウォームアップ Task の参照（GC による途中消失を防ぎ、unload 時にキャンセルする）
         self._warmup_task: asyncio.Task[None] | None = None
+
+    async def cog_check(self, ctx: commands.Context) -> bool:
+        """読み上げ系コマンドはサーバー内でのみ使用可能（DM では無視される）"""
+        if ctx.guild is None:
+            raise commands.NoPrivateMessage()
+        return True
+
+    async def interaction_check(self, interaction: discord.Interaction, /) -> bool:
+        if interaction.guild is None:
+            raise app_commands.NoPrivateMessage()
+        return True
 
     async def cog_load(self):
         """Cog 読み込み完了後にウォームアップタスクを起動する"""
@@ -261,7 +290,7 @@ class TTS(commands.Cog):
         guild = self.bot.get_guild(guild_id)
         if guild is None:
             return
-        vc: discord.VoiceClient | None = guild.voice_client
+        vc = _voice_client(guild)
         if vc is None:
             return
         non_bots = [m for m in vc.channel.members if not m.bot]
@@ -375,7 +404,7 @@ class TTS(commands.Cog):
             pcm: bytes = await pcm_q.get()
             try:
                 guild = self.bot.get_guild(guild_id)
-                vc: discord.VoiceClient | None = guild.voice_client if guild else None
+                vc = _voice_client(guild) if guild else None
                 if vc and vc.is_connected():
                     event = asyncio.Event()
                     play_error: list[Exception | None] = [None]
@@ -400,10 +429,10 @@ class TTS(commands.Cog):
             finally:
                 pcm_q.task_done()
 
-    async def _join_vc(self, voice_channel: discord.VoiceChannel):
+    async def _join_vc(self, voice_channel: discord.VoiceChannel | discord.StageChannel):
         """VCに参加してワーカーを起動する共通処理"""
         guild_id = voice_channel.guild.id
-        vc: discord.VoiceClient | None = voice_channel.guild.voice_client
+        vc = _voice_client(voice_channel.guild)
 
         if vc is not None:
             if vc.channel == voice_channel:
@@ -458,13 +487,13 @@ class TTS(commands.Cog):
 
     async def _get_valid_speaker_ids(self) -> set[int] | None:
         """有効な speaker_id セットを返す（キャッシュ利用）。失敗時は None"""
-        if not await self._ensure_speakers_cache():
+        if not await self._ensure_speakers_cache() or self._speaker_id_map is None:
             return None
         return set(self._speaker_id_map.keys())
 
     async def _resolve_speaker_name(self, speaker_id: int) -> str | None:
         """speaker_id から「キャラ名 / スタイル名」の文字列を返す（キャッシュ利用）"""
-        if not await self._ensure_speakers_cache():
+        if not await self._ensure_speakers_cache() or self._speaker_id_map is None:
             return None
         entry = self._speaker_id_map.get(speaker_id)
         return f"{entry[0]} / {entry[1]}" if entry else None
@@ -505,14 +534,21 @@ class TTS(commands.Cog):
 
     @commands.hybrid_command(name="join", description="VCに参加して読み上げを開始します")
     async def join(self, ctx: commands.Context):
-        if ctx.author.voice is None:
+        guild = _require_guild(ctx)
+        author = ctx.author
+        voice_channel = (
+            author.voice.channel
+            if isinstance(author, discord.Member) and author.voice
+            else None
+        )
+        if voice_channel is None:
             await ctx.send("先にボイスチャンネルに参加してください。", ephemeral=True)
             return
 
         # VC接続は3秒を超える場合があるため事前に defer
         await ctx.defer()
         try:
-            vc, joined = await self._join_vc(ctx.author.voice.channel)
+            vc, joined = await self._join_vc(voice_channel)
         except discord.ClientException as e:
             await ctx.send(f"⚠️ VC への接続に失敗しました: {e}")
             return
@@ -520,10 +556,10 @@ class TTS(commands.Cog):
             await ctx.send(f"⚠️ 予期しないエラーが発生しました: {e}")
             return
 
-        self.channel_store.add(ctx.guild.id, ctx.channel.id)
+        self.channel_store.add(guild.id, ctx.channel.id)
 
         if joined:
-            self._enqueue_announce(ctx.guild.id, "接続しました")
+            self._enqueue_announce(guild.id, "接続しました")
 
         # slash コマンドは defer 後に必ず応答が必要（ユーザーのみ見える）
         if ctx.interaction:
@@ -531,13 +567,14 @@ class TTS(commands.Cog):
 
     @commands.hybrid_command(name="leave", aliases=["quit", "stop", "bye", "exit"], description="VCから退出して読み上げを停止します")
     async def leave(self, ctx: commands.Context):
-        vc: discord.VoiceClient | None = ctx.guild.voice_client
+        guild = _require_guild(ctx)
+        vc = _voice_client(guild)
         if vc is None:
             await ctx.send("ボイスチャンネルに接続していません。", ephemeral=True)
             return
 
         await ctx.defer()
-        guild_id = ctx.guild.id
+        guild_id = guild.id
         self._cancel_auto_leave(guild_id)
         self.channel_store.clear(guild_id)
         self._speed.pop(guild_id, None)
@@ -552,7 +589,7 @@ class TTS(commands.Cog):
 
     @commands.hybrid_command(name="skip", description="現在の読み上げをスキップします")
     async def skip(self, ctx: commands.Context):
-        vc: discord.VoiceClient | None = ctx.guild.voice_client
+        vc = _voice_client(_require_guild(ctx))
         if vc is None or not vc.is_playing():
             await ctx.send("現在再生中の音声はありません。", ephemeral=True)
             return
@@ -565,7 +602,7 @@ class TTS(commands.Cog):
         if not 0.5 <= value <= 2.0:
             await ctx.send("速度は 0.5〜2.0 の範囲で指定してください。", ephemeral=True)
             return
-        self._speed[ctx.guild.id] = value
+        self._speed[_require_guild(ctx).id] = value
         await ctx.send(f"⚡ 速度を `{value}` に変更しました。")
 
     # ------------------------------------------------------------------ #
@@ -678,7 +715,7 @@ class TTS(commands.Cog):
             return
 
         lines = ["🎤 **利用可能なスピーカー一覧**\n"]
-        for sp in self._speakers_cache:
+        for sp in self._speakers_cache or []:
             styles = " | ".join(f"{s['name']}: `{s['id']}`" for s in sp["styles"])
             lines.append(f"**{sp['name']}**\n　{styles}")
 
@@ -710,7 +747,10 @@ class TTS(commands.Cog):
     async def listen_add_slash(self, inter: discord.Interaction, channel: discord.TextChannel | None = None):
         await self._listen_add(inter, channel or inter.channel)
 
-    async def _listen_add(self, ctx_or_inter, channel: discord.TextChannel):
+    async def _listen_add(self, ctx_or_inter, channel: discord.abc.Snowflake | None):
+        if channel is None:
+            await self._send(ctx_or_inter, "⚠️ チャンネルを特定できませんでした。", ephemeral=True)
+            return
         guild = ctx_or_inter.guild
         added = self.channel_store.add(guild.id, channel.id)
         msg = f"📢 <#{channel.id}> を読み上げ対象に追加しました。" if added else f"<#{channel.id}> はすでに登録済みです。"
@@ -725,7 +765,10 @@ class TTS(commands.Cog):
     async def listen_remove_slash(self, inter: discord.Interaction, channel: discord.TextChannel | None = None):
         await self._listen_remove(inter, channel or inter.channel)
 
-    async def _listen_remove(self, ctx_or_inter, channel: discord.TextChannel):
+    async def _listen_remove(self, ctx_or_inter, channel: discord.abc.Snowflake | None):
+        if channel is None:
+            await self._send(ctx_or_inter, "⚠️ チャンネルを特定できませんでした。", ephemeral=True)
+            return
         guild = ctx_or_inter.guild
         removed = self.channel_store.remove(guild.id, channel.id)
         msg = f"🔇 <#{channel.id}> を読み上げ対象から削除しました。" if removed else f"<#{channel.id}> は登録されていません。"
@@ -781,13 +824,13 @@ class TTS(commands.Cog):
 
     @dict_group.command(name="remove")
     async def dict_remove_prefix(self, ctx: commands.Context, word: str):
-        removed = self.word_dict.remove(ctx.guild.id, word)
+        removed = self.word_dict.remove(_require_guild(ctx).id, word)
         await ctx.send(f"🗑️ `{word}` を削除しました。" if removed else f"`{word}` は辞書にありません。")
 
     @dict_app.command(name="remove", description="読み替え辞書から単語を削除します")
     @app_commands.describe(word="削除する単語")
     async def dict_remove_slash(self, inter: discord.Interaction, word: str):
-        removed = self.word_dict.remove(inter.guild.id, word)
+        removed = self.word_dict.remove(_require_guild(inter).id, word)
         await inter.response.send_message(
             f"🗑️ `{word}` を削除しました。" if removed else f"`{word}` は辞書にありません。"
         )
@@ -951,7 +994,7 @@ class TTS(commands.Cog):
         if member.bot:
             return
         guild = member.guild
-        vc: discord.VoiceClient | None = guild.voice_client
+        vc = _voice_client(guild)
         if vc is None:
             return
 
@@ -1012,11 +1055,11 @@ class TTS(commands.Cog):
             self._speaker_id_map = None
         ok = await self._ensure_speakers_cache()
         if ok:
-            await ctx.send(f"🔄 スピーカーキャッシュを更新しました（{len(self._speaker_id_map)}スタイル）。", ephemeral=True)
+            await ctx.send(f"🔄 スピーカーキャッシュを更新しました（{len(self._speaker_id_map or {})}スタイル）。", ephemeral=True)
         else:
             await ctx.send("⚠️ VOICEVOX に接続できませんでした。ENGINEが起動しているか確認してください。", ephemeral=True)
 
 
-async def setup(bot: commands.Bot):
+async def setup(bot: "YomiageBot"):
     cog = TTS(bot)
     await bot.add_cog(cog)

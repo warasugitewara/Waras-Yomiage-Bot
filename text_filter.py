@@ -144,7 +144,7 @@ def filter_message(
         if compiled is not None:
             combined_pat, lower_dict = compiled
 
-            def _dict_replace(m: re.Match) -> str:
+            def _dict_replace(m: re.Match[str]) -> str:
                 return lower_dict.get(m.group(0).lower(), m.group(0))
 
             text = combined_pat.sub(_dict_replace, text)

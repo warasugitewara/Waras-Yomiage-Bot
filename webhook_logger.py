@@ -67,7 +67,8 @@ class WebhookLogger:
         context: dict[str, Any] | None = None,
     ) -> None:
         """Webhook に通知を送信する。URL 未設定・クールダウン中はスキップ。"""
-        if not self.enabled or self._is_cooling_down(level, title):
+        url = self.url
+        if url is None or self._is_cooling_down(level, title):
             return
 
         icon = _ICONS.get(level, "⚪")
@@ -99,7 +100,7 @@ class WebhookLogger:
         try:
             session = await self._get_session()
             async with session.post(
-                self.url,
+                url,
                 json={"embeds": [embed]},
                 timeout=aiohttp.ClientTimeout(total=5),
             ) as resp:

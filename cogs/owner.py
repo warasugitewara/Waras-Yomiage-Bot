@@ -2,6 +2,7 @@
 
 import io
 import json
+from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
@@ -9,9 +10,12 @@ from discord.ext import commands
 
 from discord_helpers import send_response
 
+if TYPE_CHECKING:
+    from bot import YomiageBot
+
 
 class Owner(commands.Cog):
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: "YomiageBot"):
         self.bot = bot
 
     # ── ガードヘルパー ────────────────────────────────────────────────────
@@ -158,6 +162,6 @@ class Owner(commands.Cog):
         await send_response(ctx_or_inter, msg, ephemeral=True)
 
 
-async def setup(bot: commands.Bot):
+async def setup(bot: "YomiageBot"):
     cog = Owner(bot)
     await bot.add_cog(cog)

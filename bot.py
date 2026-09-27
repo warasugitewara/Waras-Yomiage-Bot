@@ -33,7 +33,7 @@ class YomiageBot(commands.Bot):
 
         # オーナーユーザーID一覧（OWNER_IDS=id1,id2 形式、未設定時は空）
         raw_owners = os.getenv("OWNER_IDS", "")
-        self.owner_ids: frozenset[int] = frozenset(
+        self.owner_ids = frozenset(
             int(x.strip()) for x in raw_owners.split(",") if x.strip().isdigit()
         )
 
@@ -81,7 +81,7 @@ class YomiageBot(commands.Bot):
             self._kuma_task = asyncio.create_task(kuma_heartbeat(), name="kuma-heartbeat")
 
     async def on_ready(self):
-        print(f"[Bot] ログイン: {self.user} (ID: {self.user.id})")
+        print(f"[Bot] ログイン: {self.user} (ID: {self.user.id if self.user else '-'})")
         print(f"[Bot] プレフィックス: {PREFIX}")
 
         _status_map = {

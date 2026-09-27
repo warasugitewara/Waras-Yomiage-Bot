@@ -1,12 +1,15 @@
 import asyncio
 from types import SimpleNamespace
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from discord.ext import commands
 
 import cogs.tts as tts_mod
 from cogs.tts import TTS, TTSItem
+
+if TYPE_CHECKING:
+    from bot import YomiageBot
 
 
 class _FakeWebhook:
@@ -24,7 +27,7 @@ def _make_cog() -> TTS:
         get_guild=lambda _gid: guild,
         webhook=_FakeWebhook(),
     )
-    return TTS(cast(commands.Bot, bot))
+    return TTS(cast("YomiageBot", bot))
 
 
 @pytest.fixture
