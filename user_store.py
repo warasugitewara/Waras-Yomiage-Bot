@@ -1,77 +1,29 @@
 """ユーザーごとの読み上げスピーカー設定の永続化管理"""
 
-import json
-import os
-import shutil
-import tempfile
 from pathlib import Path
+
+from json_store import load_json, save_json
 
 _DATA_DIR = Path(__file__).parent / "data"
 _USERS_FILE = _DATA_DIR / "users.json"
-_BACKUP_COUNT = 3
 
 
-def _rotate_backups(path: Path) -> None:
-    """最大 _BACKUP_COUNT 世代のバックアップをローテーションする。
-    liveファイルはコピーして保持（rename しない）。
-    """
-    if not path.exists():
-        return
-    for i in range(_BACKUP_COUNT - 1, 0, -1):
-        src = path.with_suffix(f".bak{i}")
-        dst = path.with_suffix(f".bak{i + 1}")
-        if src.exists():
-            src.replace(dst)
-    shutil.copy2(str(path), str(path.with_suffix(".bak1")))
+def _validate_users(raw: object) -> dict[str, int] | None:
+    """{user_id(str): speaker_id(int)} のみ受け入れる"""
+    if isinstance(raw, dict) and all(
+        isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool)
+        for k, v in raw.items()
+    ):
+        return raw
+    return None
 
 
 def _load() -> dict[str, int]:
-    """main → bak1 → bak2 → bak3 の順にフォールバックして読み込む"""
-    paths = [_USERS_FILE] + [
-        _USERS_FILE.with_suffix(f".bak{i}") for i in range(1, _BACKUP_COUNT + 1)
-    ]
-    for p in paths:
-        if not p.exists():
-            continue
-        try:
-            with p.open(encoding="utf-8") as f:
-                data = json.load(f)
-            # 型バリデーション: {str → int} のみ受け入れる
-            if isinstance(data, dict) and all(
-                isinstance(k, str) and isinstance(v, int) for k, v in data.items()
-            ):
-                return data
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+    return load_json(_USERS_FILE, _validate_users, {})
 
 
 def _save(data: dict[str, int]) -> None:
-    """atomic write: temp→fsync→rotate→replace→dir_fsync"""
-    _DATA_DIR.mkdir(exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=_DATA_DIR, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        _rotate_backups(_USERS_FILE)
-        os.replace(tmp_path, _USERS_FILE)
-        # ディレクトリエントリの永続化（POSIX）
-        try:
-            dir_fd = os.open(str(_DATA_DIR), os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except OSError:
-            pass
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    save_json(_USERS_FILE, data)
 
 
 class UserVoiceStore:

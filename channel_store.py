@@ -1,81 +1,55 @@
 """読み上げチャンネルと読み替え辞書の永続化管理"""
 
-import json
-import os
-import shutil
-import tempfile
 from pathlib import Path
+
+from json_store import load_json, save_json
 
 _DATA_DIR = Path(__file__).parent / "data"
 _CHANNELS_FILE = _DATA_DIR / "channels.json"
 _DICT_FILE = _DATA_DIR / "dict.json"
-_BACKUP_COUNT = 3
 
 
-def _rotate_backups(path: Path) -> None:
-    if not path.exists():
-        return
-    for i in range(_BACKUP_COUNT - 1, 0, -1):
-        src = path.with_suffix(f".bak{i}")
-        dst = path.with_suffix(f".bak{i + 1}")
-        if src.exists():
-            src.replace(dst)
-    shutil.copy2(str(path), str(path.with_suffix(".bak1")))
+def _is_int(v: object) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
 
 
-def _load_json(path: Path, default) -> dict:
-    """main → bak1 → bak2 → bak3 の順にフォールバックして読み込む"""
-    paths = [path] + [path.with_suffix(f".bak{i}") for i in range(1, _BACKUP_COUNT + 1)]
-    for p in paths:
-        if not p.exists():
-            continue
-        try:
-            with p.open(encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return default
+def _validate_channels(raw: object) -> dict[int, set[int]] | None:
+    """{guild_id(str): [channel_id(int), ...]} のみ受け入れる"""
+    if not isinstance(raw, dict):
+        return None
+    result: dict[int, set[int]] = {}
+    for gid, cids in raw.items():
+        if not (isinstance(gid, str) and gid.isdigit() and isinstance(cids, list)):
+            return None
+        if not all(_is_int(c) for c in cids):
+            return None
+        result[int(gid)] = set(cids)
+    return result
 
 
-def _save_json(path: Path, data) -> None:
-    """atomic write: temp→fsync→rotate→replace→dir_fsync"""
-    _DATA_DIR.mkdir(exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=_DATA_DIR, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        _rotate_backups(path)
-        os.replace(tmp_path, path)
-        try:
-            dir_fd = os.open(str(_DATA_DIR), os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except OSError:
-            pass
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+def _validate_dict(raw: object) -> dict[int, dict[str, str]] | None:
+    """{guild_id(str): {word(str): reading(str)}} のみ受け入れる"""
+    if not isinstance(raw, dict):
+        return None
+    result: dict[int, dict[str, str]] = {}
+    for gid, d in raw.items():
+        if not (isinstance(gid, str) and gid.isdigit() and isinstance(d, dict)):
+            return None
+        if not all(isinstance(k, str) and isinstance(v, str) for k, v in d.items()):
+            return None
+        result[int(gid)] = d
+    return result
 
 
 class ChannelStore:
     """ギルドごとの読み上げチャンネルセットを管理する"""
 
     def __init__(self):
-        raw: dict[str, list[int]] = _load_json(_CHANNELS_FILE, {})
-        # guild_id(str) → set[channel_id(int)]
-        self._data: dict[int, set[int]] = {
-            int(gid): set(cids) for gid, cids in raw.items()
-        }
+        # guild_id → set[channel_id]
+        self._data: dict[int, set[int]] = load_json(_CHANNELS_FILE, _validate_channels, {})
 
     def _save(self):
-        _save_json(
+        save_json(
             _CHANNELS_FILE,
             {str(gid): list(cids) for gid, cids in self._data.items()},
         )
@@ -117,14 +91,11 @@ class WordDict:
     """ギルドごとの読み替え辞書を管理する"""
 
     def __init__(self):
-        raw = _load_json(_DICT_FILE, {})
-        # guild_id(str) → {word: reading}
-        self._data: dict[int, dict[str, str]] = {
-            int(gid): d for gid, d in raw.items() if isinstance(d, dict)
-        }
+        # guild_id → {word: reading}
+        self._data: dict[int, dict[str, str]] = load_json(_DICT_FILE, _validate_dict, {})
 
     def _save(self):
-        _save_json(_DICT_FILE, {str(gid): d for gid, d in self._data.items()})
+        save_json(_DICT_FILE, {str(gid): d for gid, d in self._data.items()})
 
     def _guild_dict(self, guild_id: int) -> dict[str, str]:
         return self._data.setdefault(guild_id, {})
