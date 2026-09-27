@@ -20,6 +20,23 @@ _DISCORD_MAX = 1900
 # PCM キャッシュの最大エントリ数（WAV→PCM変換済みバイト列）
 _PCM_CACHE_MAX = 100
 
+# 読み替え辞書の上限（巨大入力による負荷・メモリ消費を防ぐ）
+_DICT_IMPORT_MAX_BYTES = 1024 * 1024
+_DICT_MAX_ENTRIES = 5000
+_DICT_WORD_MAX_LEN = 50
+_DICT_READING_MAX_LEN = 100
+
+
+def _validate_dict_entry(word: str, reading: str) -> str | None:
+    """辞書エントリを検証し、不正ならエラーメッセージを返す"""
+    if not word.strip():
+        return "⚠️ 空の単語は登録できません。"
+    if len(word) > _DICT_WORD_MAX_LEN:
+        return f"⚠️ 単語は {_DICT_WORD_MAX_LEN} 文字以内で指定してください。"
+    if len(reading) > _DICT_READING_MAX_LEN:
+        return f"⚠️ 読みは {_DICT_READING_MAX_LEN} 文字以内で指定してください。"
+    return None
+
 
 async def _wav_to_pcm(wav_bytes: bytes) -> bytes:
     """VOICEVOX出力WAV(24kHz mono)をDiscord用PCM(48kHz stereo s16le)に変換する。
@@ -695,14 +712,24 @@ class TTS(commands.Cog):
 
     @dict_group.command(name="add")
     async def dict_add_prefix(self, ctx: commands.Context, word: str, reading: str):
-        self.word_dict.add(ctx.guild.id, word, reading)
-        await ctx.send(f"📖 `{word}` → `{reading}` を辞書に追加しました。")
+        await self._dict_add(ctx, word, reading)
 
     @dict_app.command(name="add", description="読み替え辞書に単語を追加します")
     @app_commands.describe(word="元の単語", reading="読み替え後のテキスト")
     async def dict_add_slash(self, inter: discord.Interaction, word: str, reading: str):
-        self.word_dict.add(inter.guild.id, word, reading)
-        await inter.response.send_message(f"📖 `{word}` → `{reading}` を辞書に追加しました。")
+        await self._dict_add(inter, word, reading)
+
+    async def _dict_add(self, ctx_or_inter, word: str, reading: str):
+        guild_id = ctx_or_inter.guild.id
+        error = _validate_dict_entry(word, reading)
+        current = self.word_dict.all(guild_id)
+        if error is None and word not in current and len(current) >= _DICT_MAX_ENTRIES:
+            error = f"⚠️ 辞書の登録数が上限（{_DICT_MAX_ENTRIES}件）に達しています。"
+        if error:
+            await self._send(ctx_or_inter, error, ephemeral=True)
+            return
+        self.word_dict.add(guild_id, word, reading)
+        await self._send(ctx_or_inter, f"📖 `{word}` → `{reading}` を辞書に追加しました。")
 
     @dict_group.command(name="remove")
     async def dict_remove_prefix(self, ctx: commands.Context, word: str):
@@ -789,6 +816,13 @@ class TTS(commands.Cog):
         if not attachment.filename.endswith(".json"):
             await self._send(ctx_or_inter, "⚠️ `.json` ファイルのみ対応しています。")
             return
+        # 読み込み前にサイズを検査（巨大ファイルをメモリへ展開しない）
+        if attachment.size > _DICT_IMPORT_MAX_BYTES:
+            await self._send(
+                ctx_or_inter,
+                f"⚠️ ファイルサイズが上限（{_DICT_IMPORT_MAX_BYTES // 1024}KB）を超えています。",
+            )
+            return
         try:
             raw_bytes = await attachment.read()
             data = _json.loads(raw_bytes.decode("utf-8"))
@@ -801,10 +835,31 @@ class TTS(commands.Cog):
             await self._send(ctx_or_inter, "⚠️ サポートされていないJSONフォーマットです。")
             return
 
+        # 空単語は読み上げに影響しないため黙ってスキップする
+        entries = {w: r for w, r in entries.items() if w.strip()}
         guild_id = ctx_or_inter.guild.id
+        error = self._check_dict_import(
+            entries, {} if replace else self.word_dict.all(guild_id)
+        )
+        if error:
+            await self._send(ctx_or_inter, f"{error}\nインポートは行われませんでした。")
+            return
+
         count = self.word_dict.import_dict(guild_id, entries, replace=replace)
         mode = "全置換" if replace else "マージ"
         await self._send(ctx_or_inter, f"📥 辞書を{mode}でインポートしました（{count}件）。")
+
+    @staticmethod
+    def _check_dict_import(entries: dict[str, str], current: dict[str, str]) -> str | None:
+        """インポート内容を検証する。1件でも不正なら全体を拒否するためエラーを返す"""
+        for word, reading in entries.items():
+            error = _validate_dict_entry(word, reading)
+            if error:
+                return f"{error}（`{word[:_DICT_WORD_MAX_LEN]}`）"
+        total = len(current.keys() | entries.keys())
+        if total > _DICT_MAX_ENTRIES:
+            return f"⚠️ 登録数が上限（{_DICT_MAX_ENTRIES}件）を超えます（インポート後 {total}件）。"
+        return None
 
     @staticmethod
     def _parse_dict_json(data: dict) -> dict[str, str] | None:
