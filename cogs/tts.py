@@ -92,9 +92,11 @@ class TTS(commands.Cog):
         # キャッシュヒット時はFFmpeg変換・VOICEVOX合成いずれも省略
         self._pcm_cache: collections.OrderedDict[tuple, bytes] = collections.OrderedDict()
 
-        # in-flight dedup: 合成中キーを asyncio.Future で管理（ギルド横断共有）
-        # 同じ (text, speaker_id, speed) が既に合成中なら Future を待つ
-        self._in_flight: dict[tuple, asyncio.Future] = {}
+        # in-flight dedup: 合成中キーを共有 Task で管理（ギルド横断共有）
+        # 同じ (text, speaker_id, speed) が既に合成中なら Task を shield して待つ。
+        # Task はどのギルドのワーカーにも所有されないため、/leave でワーカーが
+        # キャンセルされても合成は継続し、他ギルドの待機が停止しない
+        self._in_flight: dict[tuple, asyncio.Task[bytes]] = {}
 
     async def cog_load(self):
         """Cog 読み込み完了後にウォームアップタスクを起動する"""
@@ -116,11 +118,11 @@ class TTS(commands.Cog):
                 task.cancel()
                 tasks.append(task)
 
-        # 2. in-flight Futureをキャンセル（待機中の2次合成を解放）
-        for fut in self._in_flight.values():
-            if not fut.done():
-                fut.cancel()
-        self._in_flight.clear()
+        # 2. 共有合成 Task をキャンセル（完了時コールバックで _in_flight から外れる）
+        for task in self._in_flight.values():
+            if not task.done():
+                task.cancel()
+                tasks.append(task)
 
         # 3. キャンセルが処理されるまで待機（finally ブロックの実行を保証）
         if tasks:
@@ -225,6 +227,37 @@ class TTS(commands.Cog):
                 context={"guild_id": str(guild_id)},
             )
 
+    def _get_or_start_synthesis(self, cache_key: tuple, item: TTSItem) -> asyncio.Task[bytes]:
+        """cache_key の共有合成 Task を返す。未開始なら開始する"""
+        task = self._in_flight.get(cache_key)
+        if task is None:
+            task = asyncio.create_task(
+                self._synthesize_pcm(cache_key, item), name="tts-shared-synthesis"
+            )
+            self._in_flight[cache_key] = task
+            task.add_done_callback(
+                lambda t, key=cache_key: self._on_synthesis_done(key, t)
+            )
+        return task
+
+    def _on_synthesis_done(self, cache_key: tuple, task: asyncio.Task[bytes]) -> None:
+        if self._in_flight.get(cache_key) is task:
+            del self._in_flight[cache_key]
+        # 待機ワーカーが全員キャンセル済みでも "exception was never retrieved" を出さない
+        if not task.cancelled():
+            task.exception()
+
+    async def _synthesize_pcm(self, cache_key: tuple, item: TTSItem) -> bytes:
+        """VOICEVOX 合成 → PCM 変換し、キャッシュへ保存して返す"""
+        wav_bytes = await self.voicevox.synthesis(item.text, item.speaker_id, item.speed)
+        pcm_bytes = await _wav_to_pcm(wav_bytes)
+        # キャッシュ更新（VC切断に関わらず次回のために保存）
+        self._pcm_cache[cache_key] = pcm_bytes
+        self._pcm_cache.move_to_end(cache_key)
+        if len(self._pcm_cache) > _PCM_CACHE_MAX:
+            self._pcm_cache.popitem(last=False)
+        return pcm_bytes
+
     async def _synthesizer(self, guild_id: int):
         """メッセージキューからTTSItemを取り出し、PCMに変換してPCMキューに積む"""
         msg_q = self._get_queue(guild_id)
@@ -242,34 +275,11 @@ class TTS(commands.Cog):
                 if cache_key in self._pcm_cache:
                     self._pcm_cache.move_to_end(cache_key)
                     pcm_bytes = self._pcm_cache[cache_key]
-                elif cache_key in self._in_flight:
-                    # 別ギルドが同じテキストを合成中 → 完了を待つ
-                    try:
-                        pcm_bytes = await asyncio.shield(self._in_flight[cache_key])
-                    except Exception:
-                        continue  # 一次合成失敗 → このアイテムをスキップ
                 else:
-                    # 新規合成
-                    loop = asyncio.get_running_loop()
-                    fut: asyncio.Future[bytes] = loop.create_future()
-                    self._in_flight[cache_key] = fut
-                    try:
-                        wav_bytes = await self.voicevox.synthesis(
-                            item.text, item.speaker_id, item.speed
-                        )
-                        pcm_bytes = await _wav_to_pcm(wav_bytes)
-                        # キャッシュ更新（VC切断に関わらず次回のために保存）
-                        self._pcm_cache[cache_key] = pcm_bytes
-                        self._pcm_cache.move_to_end(cache_key)
-                        if len(self._pcm_cache) > _PCM_CACHE_MAX:
-                            self._pcm_cache.popitem(last=False)
-                        fut.set_result(pcm_bytes)
-                    except Exception as e:
-                        if not fut.done():
-                            fut.set_exception(e)
-                        raise
-                    finally:
-                        self._in_flight.pop(cache_key, None)
+                    # 新規合成、または別ギルドが合成中の共有 Task を待つ。
+                    # shield によりこのワーカーのキャンセルは Task へ伝播しない
+                    task = self._get_or_start_synthesis(cache_key, item)
+                    pcm_bytes = await asyncio.shield(task)
 
                     # 合成後にVC接続を確認（合成中に切断された場合は再生をスキップ）
                     if guild.voice_client is None:
