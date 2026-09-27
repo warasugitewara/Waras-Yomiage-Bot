@@ -49,3 +49,10 @@ def test_ascii_dictionary_key_is_case_insensitive() -> None:
 
 def test_empty_dictionary_key_is_ignored() -> None:
     assert filter_message("abc", {"": "x"}) == "abc"
+
+
+def test_dictionary_update_is_reflected() -> None:
+    d = {"cat": "ねこ"}
+    assert filter_message("cat", d) == "ねこ"
+    d["cat"] = "キャット"
+    assert filter_message("cat", d) == "キャット"

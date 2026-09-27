@@ -1,5 +1,6 @@
 """メッセージの前処理フィルター"""
 
+import functools
 import re
 
 
@@ -82,6 +83,32 @@ def _collapse_repeated_lines(text: str) -> str:
     return " ".join(result)           # 改行ではなく半角スペースで連結
 
 
+@functools.lru_cache(maxsize=32)
+def _compile_dict(
+    items: frozenset[tuple[str, str]],
+) -> tuple[re.Pattern[str], dict[str, str]] | None:
+    """辞書から置換用の正規表現を生成する（辞書内容が同じ間は再利用）。
+
+    正規表現の交替 (A|B) は「先に書いた方」を優先するため、長い語から並べる
+    ことで最長一致にする。例: 「東京駅」を「東京」より先に試す。
+    ASCII のみの単語は \b で単語境界を付けて部分一致を防ぐ。
+    """
+    # 空キーは空文字にマッチし全文字間へ展開されるため除外する
+    sorted_words = sorted((w for w, _ in items if w), key=len, reverse=True)
+    if not sorted_words:
+        return None
+    alternatives = []
+    for word in sorted_words:
+        esc = re.escape(word)
+        if _ASCII_WORD_RE.fullmatch(word):
+            alternatives.append(rf"\b{esc}\b")
+        else:
+            alternatives.append(esc)
+    combined_pat = re.compile("|".join(alternatives), re.IGNORECASE)
+    lower_dict = {k.lower(): v for k, v in items}
+    return combined_pat, lower_dict
+
+
 def filter_message(
     text: str,
     word_dict: dict[str, str],
@@ -112,23 +139,10 @@ def filter_message(
     text = _EMOJI_RE.sub(lambda m: m.group(0).split(":")[1], text)
 
     # 読み替え辞書を適用（大文字小文字区別なし）
-    # 正規表現の交替 (A|B) は「先に書いた方」を優先するため、長い語から並べる
-    # ことで最長一致にする。例: 「東京駅」を「東京」より先に試す。
-    # ASCII のみの単語は \b で単語境界を付けて部分一致を防ぐ。
     if word_dict:
-        # 空キーは空文字にマッチし全文字間へ展開されるため除外する
-        sorted_words = sorted((w for w in word_dict if w), key=len, reverse=True)
-        alternatives = []
-        for word in sorted_words:
-            esc = re.escape(word)
-            if _ASCII_WORD_RE.fullmatch(word):
-                alternatives.append(rf"\b{esc}\b")
-            else:
-                alternatives.append(esc)
-
-        if alternatives:
-            combined_pat = re.compile("|".join(alternatives), re.IGNORECASE)
-            lower_dict = {k.lower(): v for k, v in word_dict.items()}
+        compiled = _compile_dict(frozenset(word_dict.items()))
+        if compiled is not None:
+            combined_pat, lower_dict = compiled
 
             def _dict_replace(m: re.Match) -> str:
                 return lower_dict.get(m.group(0).lower(), m.group(0))
