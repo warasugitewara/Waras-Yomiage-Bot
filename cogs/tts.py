@@ -115,9 +115,12 @@ class TTS(commands.Cog):
         # キャンセルされても合成は継続し、他ギルドの待機が停止しない
         self._in_flight: dict[tuple, asyncio.Task[bytes]] = {}
 
+        # ウォームアップ Task の参照（GC による途中消失を防ぎ、unload 時にキャンセルする）
+        self._warmup_task: asyncio.Task[None] | None = None
+
     async def cog_load(self):
         """Cog 読み込み完了後にウォームアップタスクを起動する"""
-        asyncio.create_task(self._warmup(), name="voicevox-warmup")
+        self._warmup_task = asyncio.create_task(self._warmup(), name="voicevox-warmup")
 
     async def cog_unload(self):
         """シャットダウン: タスクキャンセル → gather → in_flight クリア → セッションクローズ"""
@@ -134,6 +137,9 @@ class TTS(commands.Cog):
             if not task.done():
                 task.cancel()
                 tasks.append(task)
+        if self._warmup_task and not self._warmup_task.done():
+            self._warmup_task.cancel()
+            tasks.append(self._warmup_task)
 
         # 2. 共有合成 Task をキャンセル（完了時コールバックで _in_flight から外れる）
         for task in self._in_flight.values():

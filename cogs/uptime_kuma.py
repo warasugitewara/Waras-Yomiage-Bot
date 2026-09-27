@@ -10,13 +10,16 @@ async def kuma_heartbeat():
 
     print(f"[KUMA] ハートビート開始")
     timeout = aiohttp.ClientTimeout(total=10)
-    while True:
-        try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(push_url):
-                    pass
+    # セッションは使い回す（毎回生成すると接続プールが再利用されない）
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        while True:
+            try:
+                async with session.get(push_url) as resp:
+                    # Push URL はトークンを含むためログに出さない
+                    if resp.status != 200:
+                        print(f"[KUMA] heartbeat failed: HTTP {resp.status}")
 
-        except Exception as e:
-            print(f"[KUMA] heartbeat failed: {type(e).__name__}")
+            except Exception as e:
+                print(f"[KUMA] heartbeat failed: {type(e).__name__}")
 
-        await asyncio.sleep(60)
+            await asyncio.sleep(60)

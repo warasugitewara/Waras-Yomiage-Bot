@@ -41,6 +41,9 @@ class YomiageBot(commands.Bot):
         default_speaker = int(os.getenv("DEFAULT_SPEAKER", "3"))
         self.user_voice_store = UserVoiceStore(default_speaker=default_speaker)
 
+        # バックグラウンドタスクの参照を保持（GC による途中消失を防ぎ、終了時にキャンセルする）
+        self._kuma_task: asyncio.Task[None] | None = None
+
     async def setup_hook(self):
         # Cog 読み込み
         try:
@@ -72,7 +75,7 @@ class YomiageBot(commands.Bot):
 
         # Uptime Kuma ハートビート
         if os.getenv("UPTIME_KUMA_PUSH_URL"):
-            asyncio.create_task(kuma_heartbeat())
+            self._kuma_task = asyncio.create_task(kuma_heartbeat(), name="kuma-heartbeat")
 
     async def on_ready(self):
         print(f"[Bot] ログイン: {self.user} (ID: {self.user.id})")
@@ -169,6 +172,9 @@ class YomiageBot(commands.Bot):
 
     async def close(self):
         """シャットダウン時に Webhook セッションを確実にクローズする"""
+        if self._kuma_task and not self._kuma_task.done():
+            self._kuma_task.cancel()
+            await asyncio.gather(self._kuma_task, return_exceptions=True)
         try:
             await super().close()
         finally:
