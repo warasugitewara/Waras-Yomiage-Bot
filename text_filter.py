@@ -116,7 +116,8 @@ def filter_message(
     # ことで最長一致にする。例: 「東京駅」を「東京」より先に試す。
     # ASCII のみの単語は \b で単語境界を付けて部分一致を防ぐ。
     if word_dict:
-        sorted_words = sorted(word_dict, key=len, reverse=True)
+        # 空キーは空文字にマッチし全文字間へ展開されるため除外する
+        sorted_words = sorted((w for w in word_dict if w), key=len, reverse=True)
         alternatives = []
         for word in sorted_words:
             esc = re.escape(word)
