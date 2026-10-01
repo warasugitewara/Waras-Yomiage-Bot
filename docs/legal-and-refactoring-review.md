@@ -206,7 +206,7 @@ README の「データの取り扱い」は、保存先・内容・削除方法�
 | (a) | **Bot がサーバーから退出・キックされても、そのサーバーのデータが残る**（読み上げチャンネル・辞書・自動参加・除外ユーザー ID） | `on_guild_remove` のハンドラがない（grep で確認） |
 | (b) | `users.json` のユーザー ID は、本人が `/myvoice reset` しない限り消えない（Discord アカウントを削除しても残る） | `user_store.py` |
 | (c) | README には、Webhook で送るのは「サーバー名・ユーザー名・コマンド名」とある。実際には **guild_id / channel_id とトレースバック**も送っている | `cogs/tts.py:318-321, 1222-1225`、`webhook_logger.py:85-91` |
-| (d) | README には「第三者へ提供しません」とある。しかし `VOICEVOX_URL` を別ホストに向けた場合、**メッセージ本文が平文の HTTP でネットワークを流れる**ことに触れていない | `voicevox.py:94-98` |
+| (d) | README には「第三者へ提供しません」とある。しかし `VOICEVOX_URL` を別ホストに向けた場合、**そのホストにメッセージ本文が送られる**ことに触れていない。さらに、URL が `http://` の場合は**本文が平文のままネットワークを流れる**（`https://` なら TLS で保護される。`VoicevoxClient` は `VOICEVOX_URL` をそのまま使う） | `voicevox.py:20, 57, 94-98` |
 
 **Discord 側の要件**（Developer Policy / Developer Terms の本文は取得できなかったため、**要原典確認**）
 
@@ -217,7 +217,7 @@ README の「データの取り扱い」は、保存先・内容・削除方法�
 
 1. `on_guild_remove` で、そのサーバーの `channel_store` / `word_dict` / `guild_settings` を削除する（10 行程度）。
 2. README のデータ表に「サーバーから退出したときの扱い」と「保持期間」を追記し、Webhook の送信項目を実装に合わせる。
-3. `VOICEVOX_URL` は同じホストか、信頼できるプライベートネットワークに限るよう、README に 1 行追記する。
+3. README に次の 2 点を追記する。(1) 外部の ENGINE を使う場合は、そのホストにメッセージ本文が送られる。(2) `http://` を使うのは同じホストか信頼できるプライベートネットワークに限り、それ以外では `https://`（リバースプロキシ等）を使う。
 4. 公開運用に備えて、`PRIVACY.md` のひな形を用意する（README の表をほぼそのまま使える）。
 
 <a id="l-5"></a>
@@ -585,35 +585,40 @@ README の手順は `pip install -r requirements.txt`（下限の指定だけ）
 
 ## 9. 付録A 再現手順
 
-いずれもリポジトリのルートで `uv sync --locked` を実行した後に動かします。**一時ディレクトリに書き込むので、`data/` には影響しません。**
+リポジトリのルートで `uv sync --locked` を実行した後、各ブロックを**そのままシェルに貼り付けて**実行します。スクリプトをファイルとして保存する必要はありません。
+A-1 は `tempfile.TemporaryDirectory()` の中だけに書き込み、終了時に自動で削除します。`data/` には影響しません。A-2 はファイルに書き込みません。
 
 ### A-1 R-2（`users.json` の全件消失）
 
-```python
-# PYTHONPATH=. uv run python repro_users.py
-import tempfile, pathlib
+```bash
+PYTHONPATH=. uv run python - <<'EOF'
+import pathlib, tempfile
 import user_store
 from cogs.owner import Owner
 
-d = pathlib.Path(tempfile.mkdtemp())
-user_store._USERS_FILE = d / "users.json"
-s = user_store.UserVoiceStore()
-s.set(111, 3); s.set(222, 46)
+with tempfile.TemporaryDirectory() as tmp:
+    d = pathlib.Path(tmp)
+    user_store._USERS_FILE = d / "users.json"
+    s = user_store.UserVoiceStore()
+    s.set(111, 3); s.set(222, 46)
 
-entries = Owner._parse_users_json({"version": 1, "data": [{"user_id": "333", "speaker_id": True}]})
-print("parsed:", entries)
-s.import_all(entries)
-print("file:", (d / "users.json").read_text().replace("\n", ""))
-print("reload after import:", user_store.UserVoiceStore()._data)
-for uid in (444, 555, 666):
-    s.set(uid, 1)
-print("reload after 3 more saves:", user_store.UserVoiceStore()._data)
+    entries = Owner._parse_users_json({"version": 1, "data": [{"user_id": "333", "speaker_id": True}]})
+    print("parsed:", entries)
+    s.import_all(entries)
+    print("file:", (d / "users.json").read_text().replace("\n", ""))
+    print("reload after import:", user_store.UserVoiceStore()._data)
+    for uid in (444, 555, 666):
+        s.set(uid, 1)
+    print("reload after 3 more saves:", user_store.UserVoiceStore()._data)
+EOF
 ```
+
+最後の行が `reload after 3 more saves: {}` になれば、再現できています。
 
 ### A-2 R-4（辞書の正規表現のコスト）
 
-```python
-# PYTHONPATH=. uv run python bench_dict.py
+```bash
+PYTHONPATH=. uv run python - <<'EOF'
 import random, string, time
 from text_filter import filter_message, _compile_dict
 
@@ -633,6 +638,7 @@ for n in (100, 1000, 5000):
         for _ in range(5):
             filter_message(msg, d)
         print(f"n={n:5d} {label}: {(time.perf_counter() - t) / 5 * 1000:8.1f} ms/msg")
+EOF
 ```
 
 測定値は実行する環境によって変わります。ただし、時間が件数とメッセージ長にほぼ比例して増える傾向は、どの環境でも同じです。
