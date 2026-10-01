@@ -15,6 +15,7 @@ from discord.ext import commands
 
 from channel_store import ChannelStore, WordDict
 from discord_helpers import send_response
+from guild_settings import GuildSettingsStore
 from text_filter import filter_message
 from voicevox import VoicevoxClient, VoicevoxError
 
@@ -122,6 +123,7 @@ class TTS(commands.Cog):
         self.voicevox = VoicevoxClient(os.getenv("VOICEVOX_URL", "http://localhost:50021"))
         self.channel_store = ChannelStore()
         self.word_dict = WordDict()
+        self.guild_settings = GuildSettingsStore()
 
         self.default_speaker = int(os.getenv("DEFAULT_SPEAKER", "3"))
         self.default_speed = float(os.getenv("DEFAULT_SPEED", "1.0"))
@@ -144,6 +146,9 @@ class TTS(commands.Cog):
 
         # guild_id → auto-leave task（誰もいなくなったら5秒後に退出）
         self._auto_leave_tasks: dict[int, asyncio.Task] = {}
+
+        # guild_id → 自動参加の排他ロック（同時入室で二重接続しないため）
+        self._autojoin_locks: dict[int, asyncio.Lock] = {}
 
         # スピーカー一覧キャッシュ（初回fetch後に永続。reload_speakersでリセット）
         self._speakers_cache: list[dict] | None = None
@@ -981,6 +986,164 @@ class TTS(commands.Cog):
         return None
 
     # ------------------------------------------------------------------ #
+    # autojoin サブコマンドグループ（管理者向け）
+    # ------------------------------------------------------------------ #
+
+    @commands.group(name="autojoin", invoke_without_command=True)
+    async def autojoin_group(self, ctx: commands.Context):
+        await ctx.send_help(ctx.command)
+
+    autojoin_app = app_commands.Group(name="autojoin", description="VC への自動参加の管理（サーバー管理権限が必要）")
+
+    @autojoin_group.command(name="add")
+    @commands.has_permissions(manage_guild=True)
+    async def autojoin_add_prefix(
+        self,
+        ctx: commands.Context,
+        vc: discord.VoiceChannel,
+        text: discord.TextChannel | None = None,
+    ):
+        await self._autojoin_add(ctx, vc, text)
+
+    @autojoin_app.command(name="add", description="人が入ったら自動参加する VC を登録します")
+    @app_commands.describe(
+        vc="自動参加するボイスチャンネル",
+        text="読み上げるテキストチャンネル（省略時は VC 内チャット）",
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def autojoin_add_slash(
+        self,
+        inter: discord.Interaction,
+        vc: discord.VoiceChannel,
+        text: discord.TextChannel | None = None,
+    ):
+        await self._autojoin_add(inter, vc, text)
+
+    async def _autojoin_add(self, ctx_or_inter, vc: discord.VoiceChannel, text: discord.TextChannel | None):
+        guild = _require_guild(ctx_or_inter)
+        perms = vc.permissions_for(guild.me)
+        if not (perms.connect and perms.speak):
+            await self._send(ctx_or_inter, f"⚠️ <#{vc.id}> に接続・発言する権限が Bot にありません。", ephemeral=True)
+            return
+        # テキストチャンネル未指定時は VC 内チャット（VC と同じ ID）を読み上げる
+        text_id = text.id if text else vc.id
+        self.guild_settings.set_autojoin(guild.id, vc.id, text_id)
+        await self._send(ctx_or_inter, f"🔁 <#{vc.id}> に人が入ったら自動参加し、<#{text_id}> を読み上げます。")
+
+    @autojoin_group.command(name="remove")
+    @commands.has_permissions(manage_guild=True)
+    async def autojoin_remove_prefix(self, ctx: commands.Context, vc: discord.VoiceChannel):
+        await self._autojoin_remove(ctx, vc)
+
+    @autojoin_app.command(name="remove", description="自動参加 VC の登録を解除します")
+    @app_commands.describe(vc="解除するボイスチャンネル")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def autojoin_remove_slash(self, inter: discord.Interaction, vc: discord.VoiceChannel):
+        await self._autojoin_remove(inter, vc)
+
+    async def _autojoin_remove(self, ctx_or_inter, vc: discord.VoiceChannel):
+        removed = self.guild_settings.remove_autojoin(_require_guild(ctx_or_inter).id, vc.id)
+        msg = f"🛑 <#{vc.id}> の自動参加を解除しました。" if removed else f"<#{vc.id}> は自動参加に登録されていません。"
+        await self._send(ctx_or_inter, msg)
+
+    @autojoin_group.command(name="list")
+    @commands.has_permissions(manage_guild=True)
+    async def autojoin_list_prefix(self, ctx: commands.Context):
+        await self._autojoin_list(ctx)
+
+    @autojoin_app.command(name="list", description="自動参加 VC の一覧を表示します")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def autojoin_list_slash(self, inter: discord.Interaction):
+        await self._autojoin_list(inter)
+
+    async def _autojoin_list(self, ctx_or_inter):
+        entries = self.guild_settings.autojoin_all(_require_guild(ctx_or_inter).id)
+        if not entries:
+            msg = "自動参加する VC は登録されていません。"
+        else:
+            lines = "\n".join(f"• <#{vc_id}> → <#{text_id}>" for vc_id, text_id in entries.items())
+            msg = f"🔁 自動参加 VC（VC → 読み上げ先）:\n{lines}"
+        await self._send_chunks(ctx_or_inter, msg)
+
+    # ------------------------------------------------------------------ #
+    # ignore サブコマンドグループ（読み上げ除外ユーザー）
+    # ------------------------------------------------------------------ #
+
+    @commands.group(name="ignore", invoke_without_command=True)
+    async def ignore_group(self, ctx: commands.Context):
+        await ctx.send_help(ctx.command)
+
+    ignore_app = app_commands.Group(name="ignore", description="読み上げ除外ユーザーの管理")
+
+    @ignore_group.command(name="add")
+    @commands.has_permissions(manage_guild=True)
+    async def ignore_add_prefix(self, ctx: commands.Context, user: discord.Member):
+        await self._ignore_add(ctx, user)
+
+    @ignore_app.command(name="add", description="ユーザーのメッセージを読み上げ対象外にします（サーバー管理権限が必要）")
+    @app_commands.describe(user="除外するユーザー")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def ignore_add_slash(self, inter: discord.Interaction, user: discord.Member):
+        await self._ignore_add(inter, user)
+
+    async def _ignore_add(self, ctx_or_inter, user: discord.Member):
+        added = self.guild_settings.add_ignored(_require_guild(ctx_or_inter).id, user.id)
+        msg = f"🔕 <@{user.id}> のメッセージを読み上げ対象外にしました。" if added else f"<@{user.id}> はすでに除外されています。"
+        await self._send(ctx_or_inter, msg, ephemeral=True)
+
+    @ignore_group.command(name="remove")
+    @commands.has_permissions(manage_guild=True)
+    async def ignore_remove_prefix(self, ctx: commands.Context, user: discord.Member):
+        await self._ignore_remove(ctx, user)
+
+    @ignore_app.command(name="remove", description="ユーザーの読み上げ除外を解除します（サーバー管理権限が必要）")
+    @app_commands.describe(user="除外を解除するユーザー")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def ignore_remove_slash(self, inter: discord.Interaction, user: discord.Member):
+        await self._ignore_remove(inter, user)
+
+    async def _ignore_remove(self, ctx_or_inter, user: discord.Member):
+        removed = self.guild_settings.remove_ignored(_require_guild(ctx_or_inter).id, user.id)
+        msg = f"🔔 <@{user.id}> の読み上げ除外を解除しました。" if removed else f"<@{user.id}> は除外されていません。"
+        await self._send(ctx_or_inter, msg, ephemeral=True)
+
+    @ignore_group.command(name="list")
+    @commands.has_permissions(manage_guild=True)
+    async def ignore_list_prefix(self, ctx: commands.Context):
+        await self._ignore_list(ctx)
+
+    @ignore_app.command(name="list", description="読み上げ除外ユーザーの一覧を表示します（サーバー管理権限が必要）")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def ignore_list_slash(self, inter: discord.Interaction):
+        await self._ignore_list(inter)
+
+    async def _ignore_list(self, ctx_or_inter):
+        ignored = self.guild_settings.ignored_all(_require_guild(ctx_or_inter).id)
+        if not ignored:
+            msg = "読み上げ除外ユーザーはいません。"
+        else:
+            lines = "\n".join(f"• <@{uid}>" for uid in sorted(ignored))
+            msg = f"🔕 読み上げ除外ユーザー ({len(ignored)}人):\n{lines}"
+        await self._send_chunks(ctx_or_inter, msg, ephemeral=True)
+
+    @ignore_group.command(name="me")
+    async def ignore_me_prefix(self, ctx: commands.Context):
+        await self._ignore_me(ctx)
+
+    @ignore_app.command(name="me", description="自分のメッセージの読み上げ除外を切り替えます")
+    async def ignore_me_slash(self, inter: discord.Interaction):
+        await self._ignore_me(inter)
+
+    async def _ignore_me(self, ctx_or_inter):
+        guild = _require_guild(ctx_or_inter)
+        user = ctx_or_inter.user if isinstance(ctx_or_inter, discord.Interaction) else ctx_or_inter.author
+        if self.guild_settings.toggle_ignored(guild.id, user.id):
+            msg = "🔕 あなたのメッセージを読み上げ対象外にしました。もう一度実行すると戻ります。"
+        else:
+            msg = "🔔 あなたのメッセージを再び読み上げます。"
+        await self._send(ctx_or_inter, msg, ephemeral=True)
+
+    # ------------------------------------------------------------------ #
     # Voice state event
     # ------------------------------------------------------------------ #
 
@@ -996,6 +1159,7 @@ class TTS(commands.Cog):
         guild = member.guild
         vc = _voice_client(guild)
         if vc is None:
+            await self._maybe_autojoin(member, before, after)
             return
 
         bot_channel = vc.channel
@@ -1010,6 +1174,37 @@ class TTS(commands.Cog):
             if not non_bots:
                 self._schedule_auto_leave(guild.id)
 
+    async def _maybe_autojoin(
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
+    ) -> None:
+        """Bot 未接続時、自動参加に登録された VC に人が入ったら参加する"""
+        channel = after.channel
+        if channel is None or channel == before.channel:
+            return
+        guild = member.guild
+        text_id = self.guild_settings.autojoin_text(guild.id, channel.id)
+        if text_id is None:
+            return
+        lock = self._autojoin_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            # ロック待ちの間に別の入室イベントや /join で接続済みなら何もしない
+            if _voice_client(guild) is not None:
+                return
+            try:
+                await self._join_vc(channel)
+            except Exception as e:
+                print(f"[AUTO-JOIN ERROR] {e}")
+                await self.bot.webhook.send(
+                    "warning", "自動参加エラー", exc=e,
+                    context={"guild_id": str(guild.id), "channel_id": str(channel.id)},
+                )
+                return
+        self.channel_store.add(guild.id, text_id)
+        self._enqueue_announce(guild.id, "接続しました")
+
     # ------------------------------------------------------------------ #
     # Message event
     # ------------------------------------------------------------------ #
@@ -1023,6 +1218,8 @@ class TTS(commands.Cog):
         if message.guild.voice_client is None:
             return
         if not self.channel_store.is_watched(message.guild.id, message.channel.id):
+            return
+        if self.guild_settings.is_ignored(message.guild.id, message.author.id):
             return
 
         # コマンド呼び出し（プレフィックスで始まる）は読み上げない

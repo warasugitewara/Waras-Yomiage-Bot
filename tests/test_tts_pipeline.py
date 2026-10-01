@@ -1,12 +1,15 @@
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
+import discord
 import pytest
 from discord.ext import commands
 
 import cogs.tts as tts_mod
 from cogs.tts import TTS, TTSItem
+from guild_settings import GuildSettingsStore
 
 if TYPE_CHECKING:
     from bot import YomiageBot
@@ -26,6 +29,7 @@ def _make_cog() -> TTS:
         user_voice_store=SimpleNamespace(get=lambda _uid: 3),
         get_guild=lambda _gid: guild,
         webhook=_FakeWebhook(),
+        command_prefix="!",
     )
     return TTS(cast("YomiageBot", bot))
 
@@ -173,3 +177,98 @@ async def test_synthesis_concurrency_is_limited(cog: TTS, monkeypatch: pytest.Mo
     await asyncio.wait_for(asyncio.gather(*tasks), timeout=1.0)
     assert peak == tts_mod._SYNTH_CONCURRENCY
     await cog.cog_unload()
+
+
+class _FakeChannelStore:
+    def __init__(self, watched: set[int] | None = None) -> None:
+        self.added: list[tuple[int, int]] = []
+        self.watched = watched or set()
+
+    def add(self, guild_id: int, channel_id: int) -> bool:
+        self.added.append((guild_id, channel_id))
+        return True
+
+    def is_watched(self, guild_id: int, channel_id: int) -> bool:
+        return channel_id in self.watched
+
+
+def _voice_event(
+    guild_id: int, before: object, after: object
+) -> tuple[discord.Member, discord.VoiceState, discord.VoiceState]:
+    member = SimpleNamespace(bot=False, guild=SimpleNamespace(id=guild_id), display_name="u")
+    return (
+        cast(discord.Member, member),
+        cast(discord.VoiceState, SimpleNamespace(channel=before)),
+        cast(discord.VoiceState, SimpleNamespace(channel=after)),
+    )
+
+
+async def test_autojoin_joins_registered_vc_once(
+    cog: TTS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """登録 VC に同時に2人入っても接続は1回で、読み上げ先が登録されること"""
+    cog.guild_settings = GuildSettingsStore(tmp_path / "gs.json")
+    cog.guild_settings.set_autojoin(1, 10, 20)
+    channels = _FakeChannelStore()
+    monkeypatch.setattr(cog, "channel_store", channels)
+    monkeypatch.setattr(cog, "_enqueue_announce", lambda gid, text: None)
+
+    connected: dict[int, object] = {}
+    joins: list[object] = []
+
+    async def fake_join(channel: object):
+        joins.append(channel)
+        await asyncio.sleep(0.01)
+        connected[1] = object()
+        return connected[1], True
+
+    monkeypatch.setattr(tts_mod, "_voice_client", lambda guild: connected.get(guild.id))
+    monkeypatch.setattr(cog, "_join_vc", fake_join)
+
+    vc = SimpleNamespace(id=10)
+    await asyncio.gather(
+        cog._maybe_autojoin(*_voice_event(1, None, vc)),
+        cog._maybe_autojoin(*_voice_event(1, None, vc)),
+    )
+    assert joins == [vc]
+    assert channels.added == [(1, 20)]
+
+
+async def test_autojoin_ignores_unregistered_vc(
+    cog: TTS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cog.guild_settings = GuildSettingsStore(tmp_path / "gs.json")
+    cog.guild_settings.set_autojoin(1, 10, 20)
+
+    async def fail_join(channel: object):
+        raise AssertionError("joined unexpectedly")
+
+    monkeypatch.setattr(tts_mod, "_voice_client", lambda guild: None)
+    monkeypatch.setattr(cog, "_join_vc", fail_join)
+    vc = SimpleNamespace(id=10)
+    other = SimpleNamespace(id=11)
+    await cog._maybe_autojoin(*_voice_event(1, None, other))
+    await cog._maybe_autojoin(*_voice_event(1, vc, vc))
+    await cog._maybe_autojoin(*_voice_event(1, vc, None))
+
+
+async def test_ignored_user_message_is_not_read(
+    cog: TTS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cog.guild_settings = GuildSettingsStore(tmp_path / "gs.json")
+    cog.guild_settings.add_ignored(1, 5)
+    monkeypatch.setattr(cog, "channel_store", _FakeChannelStore({20}))
+    queued: list[str] = []
+    monkeypatch.setattr(cog, "_enqueue_item", lambda gid, item: queued.append(item.text))
+
+    def message(author_id: int) -> discord.Message:
+        return cast(discord.Message, SimpleNamespace(
+            author=SimpleNamespace(id=author_id, bot=False),
+            guild=SimpleNamespace(id=1, voice_client=object()),
+            channel=SimpleNamespace(id=20),
+            content="こんにちは",
+        ))
+
+    await cog.on_message(message(5))
+    await cog.on_message(message(6))
+    assert queued == ["こんにちは"]

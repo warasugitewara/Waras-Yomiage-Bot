@@ -374,6 +374,7 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | `!myvoice info` / `/myvoice info` | 現在の自分のボイス設定を確認 |
 | `!myvoice reset` / `/myvoice reset` | デフォルト（ずんだもん ノーマル）に戻す |
 | `!voice <ID>` / `/voice <ID>` | `!myvoice set` の短縮形 |
+| `!ignore me` / `/ignore me` | 自分のメッセージをこのサーバーで読み上げ対象外にする（もう一度実行で解除） |
 | `!speed <値>` / `/speed <値>` | サーバー全体の読み上げ速度を変更（0.5〜2.0） |
 
 > 💡 ボイス設定はユーザーごとに独立しています。未設定のユーザーは **ずんだもん ノーマル（ID: 3）** が使われます。
@@ -383,6 +384,12 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | コマンド | 権限 | 説明 |
 |---|---|---|
 | `!reload_speakers` / `/reload_speakers` | サーバー管理 | VOICEVOXのスピーカー情報キャッシュを再取得（ENGINE更新後などに使用） |
+| `!autojoin add <VC> [#ch]` / `/autojoin add <vc> [text]` | サーバー管理 | VC に人が入ったら自動参加して指定チャンネルを読み上げる（省略時は VC 内チャット） |
+| `!autojoin remove <VC>` / `/autojoin remove <vc>` | サーバー管理 | 自動参加の登録を解除 |
+| `!autojoin list` / `/autojoin list` | サーバー管理 | 自動参加 VC と読み上げ先を一覧表示 |
+| `!ignore add <@user>` / `/ignore add <user>` | サーバー管理 | ユーザーのメッセージを読み上げ対象外にする（入退室アナウンスは対象外にならない） |
+| `!ignore remove <@user>` / `/ignore remove <user>` | サーバー管理 | 読み上げ除外を解除 |
+| `!ignore list` / `/ignore list` | サーバー管理 | 読み上げ除外ユーザーを一覧表示（実行者のみに表示） |
 
 ### オーナー向け
 
@@ -472,6 +479,8 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
   Discord UI でヘッドホンに × アイコンが表示され、ボットがマイク入力を一切受け取らないことがわかります
 - TTS の音声送信（読み上げ再生）はデフ状態でも問題なく動作します
 - VCに人間が **誰もいなくなってから5秒後** に自動退出します（Bot はカウント外）
+- `/autojoin add` で登録した VC に、Bot が未接続の状態で人が入ると自動参加し、登録したテキストチャンネル（省略時は VC 内チャット）を読み上げ対象に追加します
+  Bot が別の VC に接続中の場合は自動参加しません
 
 ---
 
@@ -639,6 +648,7 @@ systemctl enable --now voicevox yomiage-bot
 | ボイス設定 | `data/users.json` | ユーザーID → スピーカーID | `/myvoice reset` |
 | 読み上げチャンネル | `data/channels.json` | サーバーID → チャンネルID | `/listen remove` または `/leave` |
 | 読み替え辞書 | `data/dict.json` | サーバーID → 単語・読み | `/dict remove` |
+| 自動参加・除外ユーザー | `data/guild_settings.json` | サーバーID → VC・チャンネルID、除外ユーザーID | `/autojoin remove`・`/ignore remove`・`/ignore me` |
 
 - **メッセージ本文はディスクに保存しません。** 合成済み音声はメモリ上に一時キャッシュされ（最大100件・64MB）、Bot の再起動で消去されます。
 - `ERROR_WEBHOOK_URL` を設定した場合、エラー通知にサーバー名・ユーザー名・コマンド名が含まれ、指定した Webhook に送信されます。

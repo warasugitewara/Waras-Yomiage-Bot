@@ -25,6 +25,7 @@ _HELP_DATA = [
         ("`/myvoice set <id>`", "自分のボイスを設定 (alias: `!voice`)"),
         ("`/myvoice info`", "現在のボイス設定を確認"),
         ("`/myvoice reset`", "ボイス設定を初期化"),
+        ("`/ignore me`", "自分のメッセージの読み上げ除外を切り替え"),
     ]),
     ("📢 チャンネル・辞書", [
         ("`/listen <add|remove|list>`", "読み上げチャンネルの管理"),
@@ -33,6 +34,8 @@ _HELP_DATA = [
     ]),
     ("👑 管理・オーナー", [
         ("`/reload_speakers`", "スピーカー情報を再取得"),
+        ("`/autojoin <add|remove|list>`", "人が入ったら自動参加する VC の管理"),
+        ("`/ignore <add|remove|list>`", "読み上げ除外ユーザーの管理"),
         ("`/owner <export|import>_users`", "ユーザー設定の管理"),
     ]),
     ("🛠️ ユーティリティ", [
