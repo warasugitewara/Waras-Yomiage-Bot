@@ -36,6 +36,7 @@ _HELP_DATA = [
         ("`/reload_speakers`", "スピーカー情報を再取得"),
         ("`/autojoin <add|remove|list>`", "人が入ったら自動参加する VC の管理"),
         ("`/ignore <add|remove|list>`", "読み上げ除外ユーザーの管理"),
+        ("`/readname <True|False>`", "発言者名の読み上げを切り替え"),
         ("`/owner <export|import>_users`", "ユーザー設定の管理"),
     ]),
     ("🛠️ ユーティリティ", [

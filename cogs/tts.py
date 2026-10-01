@@ -38,6 +38,9 @@ _DICT_MAX_ENTRIES = 5000
 _DICT_WORD_MAX_LEN = 50
 _DICT_READING_MAX_LEN = 100
 
+# 名前読み上げ時の名前の最大文字数（長い表示名で本文が埋もれないように）
+_NAME_MAX_LEN = 20
+
 
 def _validate_dict_entry(word: str, reading: str) -> str | None:
     """辞書エントリを検証し、不正ならエラーメッセージを返す"""
@@ -149,6 +152,9 @@ class TTS(commands.Cog):
 
         # guild_id → 自動参加の排他ロック（同時入室で二重接続しないため）
         self._autojoin_locks: dict[int, asyncio.Lock] = {}
+
+        # guild_id → 直前に読み上げたメッセージの発言者ID（連続投稿時は名前を省略する）
+        self._last_author: dict[int, int] = {}
 
         # スピーカー一覧キャッシュ（初回fetch後に永続。reload_speakersでリセット）
         self._speakers_cache: list[dict] | None = None
@@ -303,6 +309,7 @@ class TTS(commands.Cog):
             return
         self.channel_store.clear(guild_id)
         self._speed.pop(guild_id, None)
+        self._last_author.pop(guild_id, None)
         self._cancel_workers(guild_id)
         try:
             await vc.disconnect()
@@ -583,6 +590,7 @@ class TTS(commands.Cog):
         self._cancel_auto_leave(guild_id)
         self.channel_store.clear(guild_id)
         self._speed.pop(guild_id, None)
+        self._last_author.pop(guild_id, None)
         self._cancel_workers(guild_id)
 
         try:
@@ -1144,6 +1152,20 @@ class TTS(commands.Cog):
         await self._send(ctx_or_inter, msg, ephemeral=True)
 
     # ------------------------------------------------------------------ #
+    # readname（発言者名の読み上げ、管理者向け）
+    # ------------------------------------------------------------------ #
+
+    @commands.hybrid_command(name="readname", description="発言者の名前を読み上げるかを切り替えます（サーバー管理権限が必要）")
+    @app_commands.describe(enabled="True で名前を読み上げる / False で読み上げない")
+    @commands.has_permissions(manage_guild=True)
+    async def readname(self, ctx: commands.Context, enabled: bool):
+        self.guild_settings.set_read_name(_require_guild(ctx).id, enabled)
+        if enabled:
+            await ctx.send("🏷️ 発言者の名前を読み上げます（同じ人の連続投稿では省略）。")
+        else:
+            await ctx.send("🏷️ 発言者の名前を読み上げないようにしました。")
+
+    # ------------------------------------------------------------------ #
     # Voice state event
     # ------------------------------------------------------------------ #
 
@@ -1227,9 +1249,20 @@ class TTS(commands.Cog):
         if isinstance(prefix, str) and message.content.startswith(prefix):
             return
 
-        text = filter_message(message.content, self.word_dict.all(message.guild.id), self.max_length)
+        guild_id = message.guild.id
+        word_dict = self.word_dict.all(guild_id)
+        text = filter_message(message.content, word_dict, self.max_length)
         if text is None:
             return
+
+        # 名前読み上げ: 直前と同じ発言者なら省略する
+        author_id = message.author.id
+        if self.guild_settings.read_name(guild_id) and self._last_author.get(guild_id) != author_id:
+            # filter_message の「以下省略」付与を避けるため、名前は自前で切り詰める
+            name = filter_message(message.author.display_name, word_dict, max_length=len(message.author.display_name) * 4)
+            if name:
+                text = f"{name[:_NAME_MAX_LEN]}さん、{text}"
+        self._last_author[guild_id] = author_id
 
         # enqueue時点でスピーカーと速度を解決（後から変更しても影響しない）
         item = TTSItem(

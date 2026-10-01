@@ -55,3 +55,14 @@ def test_ignored_add_remove_toggle(tmp_path: Path) -> None:
     assert not store.remove_ignored(1, 5)
     assert json.loads(path.read_text(encoding="utf-8")) == {}
 
+
+
+def test_read_name_defaults_off_and_persists(tmp_path: Path) -> None:
+    path = tmp_path / "guild_settings.json"
+    store = GuildSettingsStore(path)
+    assert not store.read_name(1)
+    store.set_read_name(1, True)
+    assert GuildSettingsStore(path).read_name(1)
+    store.set_read_name(1, False)
+    assert json.loads(path.read_text(encoding="utf-8")) == {}
+    assert _validate_settings({"1": {"read_name": "yes"}}) is None

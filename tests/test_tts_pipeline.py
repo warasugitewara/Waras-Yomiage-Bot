@@ -263,7 +263,7 @@ async def test_ignored_user_message_is_not_read(
 
     def message(author_id: int) -> discord.Message:
         return cast(discord.Message, SimpleNamespace(
-            author=SimpleNamespace(id=author_id, bot=False),
+            author=SimpleNamespace(id=author_id, bot=False, display_name="u"),
             guild=SimpleNamespace(id=1, voice_client=object()),
             channel=SimpleNamespace(id=20),
             content="こんにちは",
@@ -272,3 +272,31 @@ async def test_ignored_user_message_is_not_read(
     await cog.on_message(message(5))
     await cog.on_message(message(6))
     assert queued == ["こんにちは"]
+
+
+async def test_read_name_prefixes_name_except_consecutive(
+    cog: TTS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cog.guild_settings = GuildSettingsStore(tmp_path / "gs.json")
+    cog.guild_settings.set_read_name(1, True)
+    monkeypatch.setattr(cog, "channel_store", _FakeChannelStore({20}))
+    queued: list[str] = []
+    monkeypatch.setattr(cog, "_enqueue_item", lambda gid, item: queued.append(item.text))
+
+    def message(author_id: int, name: str, content: str) -> discord.Message:
+        return cast(discord.Message, SimpleNamespace(
+            author=SimpleNamespace(id=author_id, bot=False, display_name=name),
+            guild=SimpleNamespace(id=1, voice_client=object()),
+            channel=SimpleNamespace(id=20),
+            content=content,
+        ))
+
+    await cog.on_message(message(5, "わらすぎ", "おなかすいた"))
+    await cog.on_message(message(5, "わらすぎ", "ごはん"))  # 連続投稿は名前を省略
+    long_name = "あいうえおかきくけこ" * 3
+    await cog.on_message(message(6, long_name, "やあ"))  # 長い名前は切り詰める
+    assert queued == [
+        "わらすぎさん、おなかすいた",
+        "ごはん",
+        f"{long_name[:tts_mod._NAME_MAX_LEN]}さん、やあ",
+    ]

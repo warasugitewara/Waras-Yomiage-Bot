@@ -390,6 +390,7 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | `!ignore add <@user>` / `/ignore add <user>` | サーバー管理 | ユーザーのメッセージを読み上げ対象外にする（入退室アナウンスは対象外にならない） |
 | `!ignore remove <@user>` / `/ignore remove <user>` | サーバー管理 | 読み上げ除外を解除 |
 | `!ignore list` / `/ignore list` | サーバー管理 | 読み上げ除外ユーザーを一覧表示（実行者のみに表示） |
+| `!readname <true\|false>` / `/readname <enabled>` | サーバー管理 | 「〇〇さん、本文」のように発言者名を付けて読み上げる（標準は OFF・同じ人の連続投稿では省略） |
 
 ### オーナー向け
 
@@ -648,7 +649,7 @@ systemctl enable --now voicevox yomiage-bot
 | ボイス設定 | `data/users.json` | ユーザーID → スピーカーID | `/myvoice reset` |
 | 読み上げチャンネル | `data/channels.json` | サーバーID → チャンネルID | `/listen remove` または `/leave` |
 | 読み替え辞書 | `data/dict.json` | サーバーID → 単語・読み | `/dict remove` |
-| 自動参加・除外ユーザー | `data/guild_settings.json` | サーバーID → VC・チャンネルID、除外ユーザーID | `/autojoin remove`・`/ignore remove`・`/ignore me` |
+| 自動参加・除外ユーザー・名前読み上げ | `data/guild_settings.json` | サーバーID → VC・チャンネルID、除外ユーザーID、名前読み上げの ON/OFF | `/autojoin remove`・`/ignore remove`・`/ignore me`・`/readname false` |
 
 - **メッセージ本文はディスクに保存しません。** 合成済み音声はメモリ上に一時キャッシュされ（最大100件・64MB）、Bot の再起動で消去されます。
 - `ERROR_WEBHOOK_URL` を設定した場合、エラー通知にサーバー名・ユーザー名・コマンド名が含まれ、指定した Webhook に送信されます。

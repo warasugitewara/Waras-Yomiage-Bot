@@ -23,13 +23,15 @@ class GuildSettings:
     autojoin: dict[int, int] = field(default_factory=dict)
     # 読み上げ対象外のユーザーID
     ignored: set[int] = field(default_factory=set)
+    # 読み上げ時に発言者名を先頭に付けるか（標準は OFF）
+    read_name: bool = False
 
     def is_empty(self) -> bool:
-        return not self.autojoin and not self.ignored
+        return not self.autojoin and not self.ignored and not self.read_name
 
 
 def _validate_settings(raw: object) -> dict[int, GuildSettings] | None:
-    """{guild_id(str): {"autojoin": {vc_id(str): text_id(int)}, "ignored": [user_id(int)]}} のみ受け入れる"""
+    """{guild_id(str): {"autojoin": {vc_id(str): text_id(int)}, "ignored": [user_id(int)], "read_name": bool}} のみ受け入れる"""
     if not isinstance(raw, dict):
         return None
     result: dict[int, GuildSettings] = {}
@@ -38,7 +40,8 @@ def _validate_settings(raw: object) -> dict[int, GuildSettings] | None:
             return None
         autojoin = entry.get("autojoin", {})
         ignored = entry.get("ignored", [])
-        if not isinstance(autojoin, dict) or not isinstance(ignored, list):
+        read_name = entry.get("read_name", False)
+        if not isinstance(autojoin, dict) or not isinstance(ignored, list) or not isinstance(read_name, bool):
             return None
         if not all(_is_id_str(k) and _is_int(v) for k, v in autojoin.items()):
             return None
@@ -47,6 +50,7 @@ def _validate_settings(raw: object) -> dict[int, GuildSettings] | None:
         result[int(gid)] = GuildSettings(
             autojoin={int(k): v for k, v in autojoin.items()},
             ignored=set(ignored),
+            read_name=read_name,
         )
     return result
 
@@ -65,6 +69,7 @@ class GuildSettingsStore:
                 str(gid): {
                     "autojoin": {str(vc): text for vc, text in s.autojoin.items()},
                     "ignored": sorted(s.ignored),
+                    "read_name": s.read_name,
                 }
                 for gid, s in self._data.items()
             },
@@ -139,3 +144,14 @@ class GuildSettingsStore:
     def ignored_all(self, guild_id: int) -> set[int]:
         s = self._data.get(guild_id)
         return set(s.ignored) if s else set()
+
+    # ---- 名前読み上げ ----
+
+    def set_read_name(self, guild_id: int, enabled: bool) -> None:
+        self._get(guild_id).read_name = enabled
+        self._prune(guild_id)
+        self._save()
+
+    def read_name(self, guild_id: int) -> bool:
+        s = self._data.get(guild_id)
+        return s is not None and s.read_name
