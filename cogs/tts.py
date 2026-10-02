@@ -605,7 +605,7 @@ class TTS(commands.Cog):
                 if isinstance(ctx_or_inter, discord.Interaction):
                     await ctx_or_inter.followup.send(chunk, ephemeral=ephemeral)
                 else:
-                    await ctx_or_inter.send(chunk)
+                    await ctx_or_inter.send(chunk, ephemeral=ephemeral)
 
     # ------------------------------------------------------------------ #
     # Basic commands
@@ -687,24 +687,17 @@ class TTS(commands.Cog):
     # myvoice コマンドグループ（ユーザー個別ボイス設定）
     # ------------------------------------------------------------------ #
 
-    @commands.group(name="myvoice", invoke_without_command=True)
+    @commands.hybrid_group(name="myvoice", description="自分の読み上げボイス設定")
     async def myvoice_group(self, ctx: commands.Context):
         await send_group_usage(ctx)
 
-    myvoice_app = app_commands.Group(name="myvoice", description="自分の読み上げボイス設定")
-
     # --- set ---
 
-    @myvoice_group.command(name="set")
+    @myvoice_group.command(name="set", description="自分の読み上げボイスを設定します")
+    @app_commands.describe(speaker_id="VOICEVOX のスピーカーID（/myvoice list で確認）")
     async def myvoice_set_prefix(self, ctx: commands.Context, speaker_id: int):
         await ctx.defer()
         await self._myvoice_set(ctx, speaker_id)
-
-    @myvoice_app.command(name="set", description="自分の読み上げボイスを設定します")
-    @app_commands.describe(speaker_id="VOICEVOX のスピーカーID（/myvoice list で確認）")
-    async def myvoice_set_slash(self, inter: discord.Interaction, speaker_id: int):
-        await inter.response.defer(ephemeral=False)
-        await self._myvoice_set(inter, speaker_id)
 
     async def _myvoice_set(self, ctx_or_inter, speaker_id: int):
         valid_ids = await self._get_valid_speaker_ids()
@@ -729,15 +722,10 @@ class TTS(commands.Cog):
 
     # --- reset ---
 
-    @myvoice_group.command(name="reset")
+    @myvoice_group.command(name="reset", description="自分のボイス設定をデフォルト（ずんだもん ノーマル）に戻します")
     async def myvoice_reset_prefix(self, ctx: commands.Context):
         await ctx.defer()
         await self._myvoice_reset(ctx)
-
-    @myvoice_app.command(name="reset", description="自分のボイス設定をデフォルト（ずんだもん ノーマル）に戻します")
-    async def myvoice_reset_slash(self, inter: discord.Interaction):
-        await inter.response.defer(ephemeral=False)
-        await self._myvoice_reset(inter)
 
     async def _myvoice_reset(self, ctx_or_inter):
         user_id = (
@@ -750,15 +738,10 @@ class TTS(commands.Cog):
 
     # --- info ---
 
-    @myvoice_group.command(name="info")
+    @myvoice_group.command(name="info", description="現在の自分のボイス設定を表示します")
     async def myvoice_info_prefix(self, ctx: commands.Context):
-        await ctx.defer()
+        await ctx.defer(ephemeral=True)
         await self._myvoice_info(ctx)
-
-    @myvoice_app.command(name="info", description="現在の自分のボイス設定を表示します")
-    async def myvoice_info_slash(self, inter: discord.Interaction):
-        await inter.response.defer(ephemeral=True)
-        await self._myvoice_info(inter)
 
     async def _myvoice_info(self, ctx_or_inter):
         user_id = (
@@ -777,15 +760,10 @@ class TTS(commands.Cog):
 
     # --- list ---
 
-    @myvoice_group.command(name="list")
+    @myvoice_group.command(name="list", description="利用可能なスピーカー一覧を表示します")
     async def myvoice_list_prefix(self, ctx: commands.Context):
-        await ctx.defer()
+        await ctx.defer(ephemeral=True)
         await self._myvoice_list(ctx)
-
-    @myvoice_app.command(name="list", description="利用可能なスピーカー一覧を表示します")
-    async def myvoice_list_slash(self, inter: discord.Interaction):
-        await inter.response.defer(ephemeral=True)
-        await self._myvoice_list(inter)
 
     async def _myvoice_list(self, ctx_or_inter):
         if not await self._ensure_speakers_cache():
@@ -814,20 +792,14 @@ class TTS(commands.Cog):
     # listen サブコマンドグループ
     # ------------------------------------------------------------------ #
 
-    @commands.group(name="listen", invoke_without_command=True)
+    @commands.hybrid_group(name="listen", description="読み上げチャンネルの管理")
     async def listen_group(self, ctx: commands.Context):
         await send_group_usage(ctx)
 
-    listen_app = app_commands.Group(name="listen", description="読み上げチャンネルの管理")
-
-    @listen_group.command(name="add")
+    @listen_group.command(name="add", description="読み上げ対象チャンネルを追加します")
+    @app_commands.describe(channel="追加するテキストチャンネル（省略時は現在のチャンネル）")
     async def listen_add_prefix(self, ctx: commands.Context, channel: discord.TextChannel | None = None):
         await self._listen_add(ctx, channel or ctx.channel)
-
-    @listen_app.command(name="add", description="読み上げ対象チャンネルを追加します")
-    @app_commands.describe(channel="追加するテキストチャンネル（省略時は現在のチャンネル）")
-    async def listen_add_slash(self, inter: discord.Interaction, channel: discord.TextChannel | None = None):
-        await self._listen_add(inter, channel or inter.channel)
 
     async def _listen_add(self, ctx_or_inter, channel: discord.abc.Snowflake | None):
         if channel is None:
@@ -843,14 +815,10 @@ class TTS(commands.Cog):
         msg = f"📢 <#{channel.id}> を読み上げ対象に追加しました。" if added else f"<#{channel.id}> はすでに登録済みです。"
         await self._send(ctx_or_inter, msg)
 
-    @listen_group.command(name="remove")
+    @listen_group.command(name="remove", description="読み上げ対象チャンネルを削除します")
+    @app_commands.describe(channel="削除するテキストチャンネル（省略時は現在のチャンネル）")
     async def listen_remove_prefix(self, ctx: commands.Context, channel: discord.TextChannel | None = None):
         await self._listen_remove(ctx, channel or ctx.channel)
-
-    @listen_app.command(name="remove", description="読み上げ対象チャンネルを削除します")
-    @app_commands.describe(channel="削除するテキストチャンネル（省略時は現在のチャンネル）")
-    async def listen_remove_slash(self, inter: discord.Interaction, channel: discord.TextChannel | None = None):
-        await self._listen_remove(inter, channel or inter.channel)
 
     async def _listen_remove(self, ctx_or_inter, channel: discord.abc.Snowflake | None):
         if channel is None:
@@ -861,13 +829,9 @@ class TTS(commands.Cog):
         msg = f"🔇 <#{channel.id}> を読み上げ対象から削除しました。" if removed else f"<#{channel.id}> は登録されていません。"
         await self._send(ctx_or_inter, msg)
 
-    @listen_group.command(name="list")
+    @listen_group.command(name="list", description="読み上げ対象チャンネル一覧を表示します")
     async def listen_list_prefix(self, ctx: commands.Context):
         await self._listen_list(ctx)
-
-    @listen_app.command(name="list", description="読み上げ対象チャンネル一覧を表示します")
-    async def listen_list_slash(self, inter: discord.Interaction):
-        await self._listen_list(inter)
 
     async def _listen_list(self, ctx_or_inter):
         channels = self.channel_store.get(ctx_or_inter.guild.id)
@@ -882,20 +846,14 @@ class TTS(commands.Cog):
     # dict サブコマンドグループ
     # ------------------------------------------------------------------ #
 
-    @commands.group(name="dict", invoke_without_command=True)
+    @commands.hybrid_group(name="dict", description="読み替え辞書の管理")
     async def dict_group(self, ctx: commands.Context):
         await send_group_usage(ctx)
 
-    dict_app = app_commands.Group(name="dict", description="読み替え辞書の管理")
-
-    @dict_group.command(name="add")
+    @dict_group.command(name="add", description="読み替え辞書に単語を追加します")
+    @app_commands.describe(word="元の単語", reading="読み替え後のテキスト")
     async def dict_add_prefix(self, ctx: commands.Context, word: str, reading: str):
         await self._dict_add(ctx, word, reading)
-
-    @dict_app.command(name="add", description="読み替え辞書に単語を追加します")
-    @app_commands.describe(word="元の単語", reading="読み替え後のテキスト")
-    async def dict_add_slash(self, inter: discord.Interaction, word: str, reading: str):
-        await self._dict_add(inter, word, reading)
 
     async def _dict_add(self, ctx_or_inter, word: str, reading: str):
         guild_id = ctx_or_inter.guild.id
@@ -909,26 +867,15 @@ class TTS(commands.Cog):
         self.word_dict.add(guild_id, word, reading)
         await self._send(ctx_or_inter, f"📖 `{word}` → `{reading}` を辞書に追加しました。")
 
-    @dict_group.command(name="remove")
+    @dict_group.command(name="remove", description="読み替え辞書から単語を削除します")
+    @app_commands.describe(word="削除する単語")
     async def dict_remove_prefix(self, ctx: commands.Context, word: str):
         removed = self.word_dict.remove(_require_guild(ctx).id, word)
         await ctx.send(f"🗑️ `{word}` を削除しました。" if removed else f"`{word}` は辞書にありません。")
 
-    @dict_app.command(name="remove", description="読み替え辞書から単語を削除します")
-    @app_commands.describe(word="削除する単語")
-    async def dict_remove_slash(self, inter: discord.Interaction, word: str):
-        removed = self.word_dict.remove(_require_guild(inter).id, word)
-        await inter.response.send_message(
-            f"🗑️ `{word}` を削除しました。" if removed else f"`{word}` は辞書にありません。"
-        )
-
-    @dict_group.command(name="list")
+    @dict_group.command(name="list", description="読み替え辞書の一覧を表示します")
     async def dict_list_prefix(self, ctx: commands.Context):
         await self._dict_list(ctx)
-
-    @dict_app.command(name="list", description="読み替え辞書の一覧を表示します")
-    async def dict_list_slash(self, inter: discord.Interaction):
-        await self._dict_list(inter)
 
     async def _dict_list(self, ctx_or_inter):
         guild_id = ctx_or_inter.guild.id
@@ -943,18 +890,14 @@ class TTS(commands.Cog):
             if isinstance(ctx_or_inter, discord.Interaction):
                 await ctx_or_inter.response.send_message(msg, file=file, ephemeral=True)
             else:
-                await ctx_or_inter.send(msg, file=file)
+                await ctx_or_inter.send(msg, file=file, ephemeral=True)
             return
         lines = "\n".join(f"• `{w}` → `{r}`" for w, r in d.items())
         await self._send_chunks(ctx_or_inter, f"📖 読み替え辞書 ({len(d)}件):\n{lines}", ephemeral=True)
 
-    @dict_group.command(name="export")
+    @dict_group.command(name="export", description="辞書をJSONファイルとしてエクスポートします")
     async def dict_export_prefix(self, ctx: commands.Context):
         await self._dict_export(ctx)
-
-    @dict_app.command(name="export", description="辞書をJSONファイルとしてエクスポートします")
-    async def dict_export_slash(self, inter: discord.Interaction):
-        await self._dict_export(inter)
 
     async def _dict_export(self, ctx_or_inter):
         guild_id = ctx_or_inter.guild.id
@@ -967,29 +910,20 @@ class TTS(commands.Cog):
         else:
             await ctx_or_inter.send(f"📤 辞書をエクスポートしました（{len(d)}件）", file=file)
 
-    @dict_group.command(name="import")
-    @commands.has_permissions(manage_guild=True)
-    async def dict_import_prefix(self, ctx: commands.Context, replace: bool = False):
-        if not ctx.message.attachments:
-            await ctx.send("⚠️ JSONファイルを添付してください。")
-            return
-        await ctx.defer()
-        await self._dict_import(ctx, ctx.message.attachments[0], replace)
-
-    @dict_app.command(name="import", description="JSONファイルから辞書をインポートします（サーバー管理権限が必要）")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @dict_group.command(name="import", description="JSONファイルから辞書をインポートします（サーバー管理権限が必要）")
     @app_commands.describe(
         file="インポートするJSONファイル",
         replace="True で既存辞書を全置換（デフォルト: False でマージ）",
     )
-    async def dict_import_slash(
+    @commands.has_permissions(manage_guild=True)
+    async def dict_import_prefix(
         self,
-        inter: discord.Interaction,
+        ctx: commands.Context,
         file: discord.Attachment,
         replace: bool = False,
     ):
-        await inter.response.defer()
-        await self._dict_import(inter, file, replace)
+        await ctx.defer()
+        await self._dict_import(ctx, file, replace)
 
     async def _dict_import(self, ctx_or_inter, attachment: discord.Attachment, replace: bool):
         if not attachment.filename.endswith(".json"):
@@ -1094,17 +1028,16 @@ class TTS(commands.Cog):
     # autojoin サブコマンドグループ（管理者向け）
     # ------------------------------------------------------------------ #
 
-    @commands.group(name="autojoin", invoke_without_command=True)
+    @commands.hybrid_group(name="autojoin", description="VC への自動参加の管理（サーバー管理権限が必要）")
+    @app_commands.default_permissions(manage_guild=True)
     async def autojoin_group(self, ctx: commands.Context):
         await send_group_usage(ctx)
 
-    autojoin_app = app_commands.Group(
-        name="autojoin",
-        description="VC への自動参加の管理（サーバー管理権限が必要）",
-        default_permissions=discord.Permissions(manage_guild=True),
+    @autojoin_group.command(name="add", description="人が入ったら自動参加する VC を登録します")
+    @app_commands.describe(
+        vc="自動参加するボイスチャンネル",
+        text="読み上げるテキストチャンネル（省略時は VC 内チャット）",
     )
-
-    @autojoin_group.command(name="add")
     @commands.has_permissions(manage_guild=True)
     async def autojoin_add_prefix(
         self,
@@ -1113,20 +1046,6 @@ class TTS(commands.Cog):
         text: discord.TextChannel | None = None,
     ):
         await self._autojoin_add(ctx, vc, text)
-
-    @autojoin_app.command(name="add", description="人が入ったら自動参加する VC を登録します")
-    @app_commands.describe(
-        vc="自動参加するボイスチャンネル",
-        text="読み上げるテキストチャンネル（省略時は VC 内チャット）",
-    )
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def autojoin_add_slash(
-        self,
-        inter: discord.Interaction,
-        vc: discord.VoiceChannel,
-        text: discord.TextChannel | None = None,
-    ):
-        await self._autojoin_add(inter, vc, text)
 
     async def _autojoin_add(self, ctx_or_inter, vc: discord.VoiceChannel, text: discord.TextChannel | None):
         guild = _require_guild(ctx_or_inter)
@@ -1139,31 +1058,21 @@ class TTS(commands.Cog):
         self.guild_settings.set_autojoin(guild.id, vc.id, text_id)
         await self._send(ctx_or_inter, f"🔁 <#{vc.id}> に人が入ったら自動参加し、<#{text_id}> を読み上げます。")
 
-    @autojoin_group.command(name="remove")
+    @autojoin_group.command(name="remove", description="自動参加 VC の登録を解除します")
+    @app_commands.describe(vc="解除するボイスチャンネル")
     @commands.has_permissions(manage_guild=True)
     async def autojoin_remove_prefix(self, ctx: commands.Context, vc: discord.VoiceChannel):
         await self._autojoin_remove(ctx, vc)
-
-    @autojoin_app.command(name="remove", description="自動参加 VC の登録を解除します")
-    @app_commands.describe(vc="解除するボイスチャンネル")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def autojoin_remove_slash(self, inter: discord.Interaction, vc: discord.VoiceChannel):
-        await self._autojoin_remove(inter, vc)
 
     async def _autojoin_remove(self, ctx_or_inter, vc: discord.VoiceChannel):
         removed = self.guild_settings.remove_autojoin(_require_guild(ctx_or_inter).id, vc.id)
         msg = f"🛑 <#{vc.id}> の自動参加を解除しました。" if removed else f"<#{vc.id}> は自動参加に登録されていません。"
         await self._send(ctx_or_inter, msg)
 
-    @autojoin_group.command(name="list")
+    @autojoin_group.command(name="list", description="自動参加 VC の一覧を表示します")
     @commands.has_permissions(manage_guild=True)
     async def autojoin_list_prefix(self, ctx: commands.Context):
         await self._autojoin_list(ctx)
-
-    @autojoin_app.command(name="list", description="自動参加 VC の一覧を表示します")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def autojoin_list_slash(self, inter: discord.Interaction):
-        await self._autojoin_list(inter)
 
     async def _autojoin_list(self, ctx_or_inter):
         entries = self.guild_settings.autojoin_all(_require_guild(ctx_or_inter).id)
@@ -1178,53 +1087,36 @@ class TTS(commands.Cog):
     # ignore サブコマンドグループ（読み上げ除外ユーザー）
     # ------------------------------------------------------------------ #
 
-    @commands.group(name="ignore", invoke_without_command=True)
+    @commands.hybrid_group(name="ignore", description="読み上げ除外ユーザーの管理")
     async def ignore_group(self, ctx: commands.Context):
         await send_group_usage(ctx)
 
-    ignore_app = app_commands.Group(name="ignore", description="読み上げ除外ユーザーの管理")
-
-    @ignore_group.command(name="add")
+    @ignore_group.command(name="add", description="ユーザーのメッセージを読み上げ対象外にします（サーバー管理権限が必要）")
+    @app_commands.describe(user="除外するユーザー")
     @commands.has_permissions(manage_guild=True)
     async def ignore_add_prefix(self, ctx: commands.Context, user: discord.Member):
         await self._ignore_add(ctx, user)
-
-    @ignore_app.command(name="add", description="ユーザーのメッセージを読み上げ対象外にします（サーバー管理権限が必要）")
-    @app_commands.describe(user="除外するユーザー")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def ignore_add_slash(self, inter: discord.Interaction, user: discord.Member):
-        await self._ignore_add(inter, user)
 
     async def _ignore_add(self, ctx_or_inter, user: discord.Member):
         added = self.guild_settings.add_ignored(_require_guild(ctx_or_inter).id, user.id)
         msg = f"🔕 <@{user.id}> のメッセージを読み上げ対象外にしました。" if added else f"<@{user.id}> はすでに除外されています。"
         await self._send(ctx_or_inter, msg, ephemeral=True)
 
-    @ignore_group.command(name="remove")
+    @ignore_group.command(name="remove", description="ユーザーの読み上げ除外を解除します（サーバー管理権限が必要）")
+    @app_commands.describe(user="除外を解除するユーザー")
     @commands.has_permissions(manage_guild=True)
     async def ignore_remove_prefix(self, ctx: commands.Context, user: discord.Member):
         await self._ignore_remove(ctx, user)
-
-    @ignore_app.command(name="remove", description="ユーザーの読み上げ除外を解除します（サーバー管理権限が必要）")
-    @app_commands.describe(user="除外を解除するユーザー")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def ignore_remove_slash(self, inter: discord.Interaction, user: discord.Member):
-        await self._ignore_remove(inter, user)
 
     async def _ignore_remove(self, ctx_or_inter, user: discord.Member):
         removed = self.guild_settings.remove_ignored(_require_guild(ctx_or_inter).id, user.id)
         msg = f"🔔 <@{user.id}> の読み上げ除外を解除しました。" if removed else f"<@{user.id}> は除外されていません。"
         await self._send(ctx_or_inter, msg, ephemeral=True)
 
-    @ignore_group.command(name="list")
+    @ignore_group.command(name="list", description="読み上げ除外ユーザーの一覧を表示します（サーバー管理権限が必要）")
     @commands.has_permissions(manage_guild=True)
     async def ignore_list_prefix(self, ctx: commands.Context):
         await self._ignore_list(ctx)
-
-    @ignore_app.command(name="list", description="読み上げ除外ユーザーの一覧を表示します（サーバー管理権限が必要）")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def ignore_list_slash(self, inter: discord.Interaction):
-        await self._ignore_list(inter)
 
     async def _ignore_list(self, ctx_or_inter):
         ignored = self.guild_settings.ignored_all(_require_guild(ctx_or_inter).id)
@@ -1235,13 +1127,9 @@ class TTS(commands.Cog):
             msg = f"🔕 読み上げ除外ユーザー ({len(ignored)}人):\n{lines}"
         await self._send_chunks(ctx_or_inter, msg, ephemeral=True)
 
-    @ignore_group.command(name="me")
+    @ignore_group.command(name="me", description="自分のメッセージの読み上げ除外を切り替えます")
     async def ignore_me_prefix(self, ctx: commands.Context):
         await self._ignore_me(ctx)
-
-    @ignore_app.command(name="me", description="自分のメッセージの読み上げ除外を切り替えます")
-    async def ignore_me_slash(self, inter: discord.Interaction):
-        await self._ignore_me(inter)
 
     async def _ignore_me(self, ctx_or_inter):
         guild = _require_guild(ctx_or_inter)

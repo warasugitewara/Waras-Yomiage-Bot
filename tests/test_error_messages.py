@@ -30,6 +30,8 @@ def test_argument_errors_are_reported() -> None:
     assert msg is not None and "`value`" in msg
     assert _user_error_message(commands.BadArgument()) is not None
     assert _user_error_message(commands.MemberNotFound("x")) is not None
+    attachment = commands.Parameter("file", inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    assert _user_error_message(commands.MissingRequiredAttachment(attachment)) == "⚠️ ファイルを添付して実行してください。"
 
 
 async def test_group_usage_lists_subcommands() -> None:
@@ -52,6 +54,22 @@ async def test_group_usage_lists_subcommands() -> None:
     async def send(msg: str) -> None:
         sent.append(msg)
 
-    ctx = SimpleNamespace(command=group, prefix="!", send=send)
+    ctx = SimpleNamespace(command=group, invoked_subcommand=None, prefix="!", send=send)
     await send_group_usage(cast(commands.Context, ctx))
     assert sent == ["使い方: `!dict <add|list>`（詳しくは `/help`）"]
+
+
+async def test_group_usage_is_silent_when_subcommand_invoked() -> None:
+    from types import SimpleNamespace
+    from typing import cast
+
+    from discord_helpers import send_group_usage
+
+    sent: list[str] = []
+
+    async def send(msg: str) -> None:
+        sent.append(msg)
+
+    ctx = SimpleNamespace(command=None, invoked_subcommand=object(), prefix="!", send=send)
+    await send_group_usage(cast(commands.Context, ctx))
+    assert sent == []

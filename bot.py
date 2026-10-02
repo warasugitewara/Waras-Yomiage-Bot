@@ -16,6 +16,8 @@ _PERMISSION_LABELS = {"manage_guild": "サーバー管理"}
 
 def _user_error_message(error: Exception) -> str | None:
     """ユーザーへ案内すべき操作エラーなら表示用メッセージを返す"""
+    if isinstance(error, commands.MissingRequiredAttachment):
+        return "⚠️ ファイルを添付して実行してください。"
     if isinstance(error, commands.MissingRequiredArgument):
         return f"⚠️ 引数 `{error.param.name}` が足りません。使い方は `/help` で確認できます。"
     if isinstance(error, commands.BadArgument):
@@ -146,6 +148,7 @@ class YomiageBot(commands.Bot):
             commands.CommandNotFound,
             commands.CheckFailure,
             commands.MissingRequiredArgument,
+            commands.MissingRequiredAttachment,
             commands.BadArgument,
             commands.DisabledCommand,
             commands.NoPrivateMessage,

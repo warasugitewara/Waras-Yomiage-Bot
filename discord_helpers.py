@@ -9,21 +9,24 @@ async def send_response(
     msg: str,
     ephemeral: bool = False,
 ) -> None:
-    """Context / Interaction 両対応の送信ヘルパー（ephemeral は Interaction のみ有効）"""
+    """Context / Interaction 両対応の送信ヘルパー（ephemeral は Interaction と hybrid のスラッシュ実行で有効）"""
     if isinstance(ctx_or_inter, discord.Interaction):
         if ctx_or_inter.response.is_done():
             await ctx_or_inter.followup.send(msg, ephemeral=ephemeral)
         else:
             await ctx_or_inter.response.send_message(msg, ephemeral=ephemeral)
     else:
-        await ctx_or_inter.send(msg)
+        await ctx_or_inter.send(msg, ephemeral=ephemeral)
 
 
 async def send_group_usage(ctx: commands.Context) -> None:
     """サブコマンドなしでグループを実行したときに、使えるサブコマンドを案内する。
 
     help_command=None のため ctx.send_help() は何も送らない。
+    hybrid_group はサブコマンド実行時にもグループ本体が先に呼ばれるため、その場合は何もしない。
     """
+    if ctx.invoked_subcommand is not None:
+        return
     group = ctx.command
     if not isinstance(group, commands.Group):
         return
