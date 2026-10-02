@@ -14,7 +14,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from channel_store import ChannelStore, WordDict
-from discord_helpers import send_response
+from discord_helpers import send_group_usage, send_response
 from guild_settings import GuildSettingsStore
 from text_filter import filter_message
 from voicevox import VoicevoxClient, VoicevoxError
@@ -642,7 +642,7 @@ class TTS(commands.Cog):
 
     @commands.group(name="myvoice", invoke_without_command=True)
     async def myvoice_group(self, ctx: commands.Context):
-        await ctx.send_help(ctx.command)
+        await send_group_usage(ctx)
 
     myvoice_app = app_commands.Group(name="myvoice", description="自分の読み上げボイス設定")
 
@@ -765,7 +765,7 @@ class TTS(commands.Cog):
 
     @commands.group(name="listen", invoke_without_command=True)
     async def listen_group(self, ctx: commands.Context):
-        await ctx.send_help(ctx.command)
+        await send_group_usage(ctx)
 
     listen_app = app_commands.Group(name="listen", description="読み上げチャンネルの管理")
 
@@ -833,7 +833,7 @@ class TTS(commands.Cog):
 
     @commands.group(name="dict", invoke_without_command=True)
     async def dict_group(self, ctx: commands.Context):
-        await ctx.send_help(ctx.command)
+        await send_group_usage(ctx)
 
     dict_app = app_commands.Group(name="dict", description="読み替え辞書の管理")
 
@@ -1024,7 +1024,7 @@ class TTS(commands.Cog):
 
     @commands.group(name="autojoin", invoke_without_command=True)
     async def autojoin_group(self, ctx: commands.Context):
-        await ctx.send_help(ctx.command)
+        await send_group_usage(ctx)
 
     autojoin_app = app_commands.Group(
         name="autojoin",
@@ -1108,7 +1108,7 @@ class TTS(commands.Cog):
 
     @commands.group(name="ignore", invoke_without_command=True)
     async def ignore_group(self, ctx: commands.Context):
-        await ctx.send_help(ctx.command)
+        await send_group_usage(ctx)
 
     ignore_app = app_commands.Group(name="ignore", description="読み上げ除外ユーザーの管理")
 

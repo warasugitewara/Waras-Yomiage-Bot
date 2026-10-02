@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from discord_helpers import send_response
+from discord_helpers import send_group_usage, send_response
 from user_store import is_valid_entry
 
 # インポートファイルの上限（辞書インポートと同じ 1MB）
@@ -47,7 +47,7 @@ class Owner(commands.Cog):
     async def owner_group(self, ctx: commands.Context):
         if not await self._check_owner(ctx):
             return
-        await ctx.send_help(ctx.command)
+        await send_group_usage(ctx)
 
     # ── slash コマンドグループ ─────────────────────────────────────────────
 

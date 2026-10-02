@@ -20,3 +20,38 @@ def test_no_private_message() -> None:
 def test_other_errors_are_not_reported_to_user() -> None:
     assert _user_error_message(commands.CommandNotFound()) is None
     assert _user_error_message(RuntimeError("boom")) is None
+
+
+def test_argument_errors_are_reported() -> None:
+    import inspect
+
+    param = commands.Parameter("value", inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    msg = _user_error_message(commands.MissingRequiredArgument(param))
+    assert msg is not None and "`value`" in msg
+    assert _user_error_message(commands.BadArgument()) is not None
+    assert _user_error_message(commands.MemberNotFound("x")) is not None
+
+
+async def test_group_usage_lists_subcommands() -> None:
+    from types import SimpleNamespace
+    from typing import cast
+
+    from discord_helpers import send_group_usage
+
+    @commands.group(name="dict")
+    async def group(ctx: commands.Context) -> None: ...
+
+    @group.command(name="add")
+    async def add(ctx: commands.Context) -> None: ...
+
+    @group.command(name="list")
+    async def list_(ctx: commands.Context) -> None: ...
+
+    sent: list[str] = []
+
+    async def send(msg: str) -> None:
+        sent.append(msg)
+
+    ctx = SimpleNamespace(command=group, prefix="!", send=send)
+    await send_group_usage(cast(commands.Context, ctx))
+    assert sent == ["使い方: `!dict <add|list>`（詳しくは `/help`）"]

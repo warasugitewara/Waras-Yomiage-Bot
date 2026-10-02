@@ -17,6 +17,11 @@ _PERMISSION_LABELS = {"manage_guild": "サーバー管理"}
 
 def _user_error_message(error: Exception) -> str | None:
     """ユーザーへ案内すべき操作エラーなら表示用メッセージを返す"""
+    if isinstance(error, commands.MissingRequiredArgument):
+        return f"⚠️ 引数 `{error.param.name}` が足りません。使い方は `/help` で確認できます。"
+    if isinstance(error, commands.BadArgument):
+        # ユーザー・チャンネルが見つからない場合や、数値でない値を渡した場合など
+        return "⚠️ 引数の形式が正しくないか、指定した対象が見つかりません。使い方は `/help` で確認できます。"
     if isinstance(error, (commands.MissingPermissions, app_commands.MissingPermissions)):
         names = "・".join(_PERMISSION_LABELS.get(p, p) for p in error.missing_permissions)
         return f"⛔ このコマンドを使うには「{names}」権限が必要です。"
