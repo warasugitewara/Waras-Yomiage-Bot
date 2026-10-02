@@ -8,6 +8,7 @@ import discord
 import pytest
 
 import cogs.tts as tts_mod
+from cogs.dictionary import Dictionary
 from cogs.owner import Owner
 from json_store import load_json, save_json
 from user_store import _validate_users, is_valid_entry
@@ -117,7 +118,7 @@ async def test_guild_remove_deletes_guild_data(tmp_path: Path, monkeypatch: pyte
 
     monkeypatch.setattr(channel_store, "_CHANNELS_FILE", tmp_path / "channels.json")
     monkeypatch.setattr(channel_store, "_DICT_FILE", tmp_path / "dict.json")
-    bot = SimpleNamespace(user_voice_store=SimpleNamespace(get=lambda _uid: 3))
+    bot = SimpleNamespace(user_voice_store=SimpleNamespace(get=lambda _uid: 3), word_dict=None, guild_settings=None)
     from bot import YomiageBot
 
     cog = tts_mod.TTS(cast(YomiageBot, bot))
@@ -147,7 +148,7 @@ async def test_guild_remove_deletes_guild_data(tmp_path: Path, monkeypatch: pyte
 
 
 def test_parse_dict_json_skips_regex_and_non_string() -> None:
-    parsed = tts_mod.TTS._parse_dict_json({
+    parsed = Dictionary._parse_dict_json({
         "kind": "com.kuroneko6423.kuronekottsbot.dictionary",
         "version": 1,
         "data": [
@@ -159,9 +160,9 @@ def test_parse_dict_json_skips_regex_and_non_string() -> None:
         ],
     })
     assert parsed == ({"cat": "ねこ", "dog": "いぬ"}, 3)
-    assert tts_mod.TTS._parse_dict_json({"a": "b"}) == ({"a": "b"}, 0)
-    assert tts_mod.TTS._parse_dict_json({"a": 1}) is None
-    assert tts_mod.TTS._parse_dict_json([]) is None
+    assert Dictionary._parse_dict_json({"a": "b"}) == ({"a": "b"}, 0)
+    assert Dictionary._parse_dict_json({"a": 1}) is None
+    assert Dictionary._parse_dict_json([]) is None
 
 
 def test_custom_url_labels() -> None:
@@ -183,7 +184,10 @@ def test_custom_url_labels() -> None:
 async def test_bot_disconnect_resets_session(monkeypatch: pytest.MonkeyPatch) -> None:
     from bot import YomiageBot
 
-    bot = SimpleNamespace(user_voice_store=SimpleNamespace(get=lambda _uid: 3), user=SimpleNamespace(id=999))
+    bot = SimpleNamespace(
+        user_voice_store=SimpleNamespace(get=lambda _uid: 3), user=SimpleNamespace(id=999),
+        word_dict=None, guild_settings=None,
+    )
     cog = tts_mod.TTS(cast(YomiageBot, bot))
     reset: list[int] = []
     monkeypatch.setattr(cog, "_reset_guild_session", reset.append)
@@ -214,6 +218,8 @@ async def test_credits_in_use_and_allowed_speakers(monkeypatch: pytest.MonkeyPat
 
     voices = {"1": 20, "2": 29, "3": 3}
     bot = SimpleNamespace(
+        word_dict=None,
+        guild_settings=None,
         user_voice_store=SimpleNamespace(
             get=lambda uid: voices.get(str(uid), 3),
             export_all=lambda: dict(voices),

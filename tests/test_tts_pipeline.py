@@ -10,6 +10,7 @@ import cogs.tts as tts_mod
 import tts_pipeline
 from cogs.tts import TTS
 from tts_pipeline import TTSItem
+from channel_store import WordDict
 from guild_settings import GuildSettingsStore
 
 if TYPE_CHECKING:
@@ -28,6 +29,8 @@ def _make_cog() -> TTS:
     guild = SimpleNamespace(voice_client=object())
     bot = SimpleNamespace(
         user_voice_store=SimpleNamespace(get=lambda _uid: 3),
+        word_dict=WordDict(),  # 以前は TTS が生成していた。読み込みのみで保存はしない
+        guild_settings=None,
         get_guild=lambda _gid: guild,
         webhook=_FakeWebhook(),
         command_prefix="!",

@@ -34,6 +34,8 @@ def _user_error_message(error: Exception) -> str | None:
 from config import get_config  # noqa: E402
 from webhook_logger import WebhookLogger  # noqa: E402
 from user_store import UserVoiceStore  # noqa: E402
+from channel_store import WordDict  # noqa: E402
+from guild_settings import GuildSettingsStore  # noqa: E402
 from cogs.uptime_kuma import kuma_heartbeat  # noqa: E402
 
 PREFIX = get_config().prefix
@@ -59,6 +61,9 @@ class YomiageBot(commands.Bot):
 
         # UserVoiceStore は TTS / Owner 両 Cog で共有（メモリキャッシュを一元管理）
         self.user_voice_store = UserVoiceStore(default_speaker=config.default_speaker)
+        # 読み替え辞書・サーバー設定は TTS / Dictionary / ServerSettings で共有
+        self.word_dict = WordDict()
+        self.guild_settings = GuildSettingsStore()
 
         # バックグラウンドタスクの参照を保持（GC による途中消失を防ぎ、終了時にキャンセルする）
         self._kuma_task: asyncio.Task[None] | None = None
@@ -70,6 +75,8 @@ class YomiageBot(commands.Bot):
         # Cog 読み込み
         try:
             await self.load_extension("cogs.tts")
+            await self.load_extension("cogs.dictionary")
+            await self.load_extension("cogs.server_settings")
             await self.load_extension("cogs.utility")
             await self.load_extension("cogs.owner")
             if get_config().health_enabled:
