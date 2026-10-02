@@ -56,6 +56,12 @@ _ASCII_WORD_RE = re.compile(r"^[a-zA-Z0-9]+$")
 # 縦方向スパムで連続する同一行を最大3行に圧縮
 _LINE_MAX_REPEAT = 3
 
+# 辞書適用前に入力を max_length の何倍で切り詰めるか。
+# 辞書の正規表現は「文字数 × 単語数」に比例して重くなるため、どうせ切り捨てる部分には適用しない
+_PRE_DICT_LENGTH_FACTOR = 4
+
+WordDictItems = frozenset[tuple[str, str]]
+
 
 def _collapse_repeated_lines(text: str) -> str:
     """改行で繰り返される同一行を最大 _LINE_MAX_REPEAT 行に圧縮する。
@@ -111,12 +117,13 @@ def _compile_dict(
 
 def filter_message(
     text: str,
-    word_dict: dict[str, str],
+    word_dict: dict[str, str] | WordDictItems,
     max_length: int = 100,
 ) -> str | None:
     """
     メッセージを読み上げ用テキストに変換する。
     読み上げ不要な場合は None を返す。
+    word_dict に frozenset を渡すと、正規表現キャッシュの検索で辞書の複製を省ける。
     """
     # 空文字・空白のみは無視
     text = text.strip()
@@ -140,7 +147,9 @@ def filter_message(
 
     # 読み替え辞書を適用（大文字小文字区別なし）
     if word_dict:
-        compiled = _compile_dict(frozenset(word_dict.items()))
+        text = text[: max_length * _PRE_DICT_LENGTH_FACTOR]
+        items = word_dict if isinstance(word_dict, frozenset) else frozenset(word_dict.items())
+        compiled = _compile_dict(items)
         if compiled is not None:
             combined_pat, lower_dict = compiled
 

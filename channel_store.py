@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from json_store import load_json, save_json
+from text_filter import WordDictItems
 
 _DATA_DIR = Path(__file__).parent / "data"
 _CHANNELS_FILE = _DATA_DIR / "channels.json"
@@ -93,8 +94,11 @@ class WordDict:
     def __init__(self):
         # guild_id → {word: reading}
         self._data: dict[int, dict[str, str]] = load_json(_DICT_FILE, _validate_dict, {})
+        # guild_id → 辞書の frozenset（メッセージごとの複製を避けるため、変更時のみ作り直す）
+        self._items_cache: dict[int, WordDictItems] = {}
 
     def _save(self):
+        self._items_cache.clear()
         save_json(_DICT_FILE, {str(gid): d for gid, d in self._data.items()})
 
     def _guild_dict(self, guild_id: int) -> dict[str, str]:
@@ -116,6 +120,14 @@ class WordDict:
 
     def all(self, guild_id: int) -> dict[str, str]:
         return dict(self._data.get(guild_id, {}))
+
+    def items(self, guild_id: int) -> WordDictItems:
+        """読み上げ用の辞書スナップショット（変更されるまで同じオブジェクトを返す）"""
+        cached = self._items_cache.get(guild_id)
+        if cached is None:
+            cached = frozenset(self._data.get(guild_id, {}).items())
+            self._items_cache[guild_id] = cached
+        return cached
 
     def import_dict(self, guild_id: int, entries: dict[str, str], replace: bool = False) -> int:
         """辞書をインポート。replace=True で既存を全置換。追加/更新件数を返す"""

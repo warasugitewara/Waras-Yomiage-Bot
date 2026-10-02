@@ -1280,7 +1280,7 @@ class TTS(commands.Cog):
             return
 
         guild_id = message.guild.id
-        word_dict = self.word_dict.all(guild_id)
+        word_dict = self.word_dict.items(guild_id)
         text = filter_message(message.content, word_dict, self.max_length)
         if text is None:
             return

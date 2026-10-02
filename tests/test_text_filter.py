@@ -1,3 +1,8 @@
+from pathlib import Path
+
+import pytest
+
+import channel_store
 from text_filter import filter_message
 
 
@@ -56,3 +61,28 @@ def test_dictionary_update_is_reflected() -> None:
     assert filter_message("cat", d) == "ねこ"
     d["cat"] = "キャット"
     assert filter_message("cat", d) == "キャット"
+
+
+def test_long_input_is_truncated_before_dictionary() -> None:
+    """辞書適用前に切り詰めても、出力は従来通り max_length で切られる"""
+    text = "ab " * 1000
+    result = filter_message(text, {"ab": "えー"}, max_length=10)
+    assert result == "えー えー えー え、以下省略"
+
+
+def test_frozenset_dictionary_is_accepted() -> None:
+    assert filter_message("cat", frozenset({("cat", "ねこ")})) == "ねこ"
+
+
+def test_word_dict_items_cache_is_invalidated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(channel_store, "_DICT_FILE", tmp_path / "dict.json")
+    wd = channel_store.WordDict()
+    wd.add(1, "cat", "ねこ")
+    first = wd.items(1)
+    assert wd.items(1) is first  # 変更がなければ同じオブジェクト
+    wd.add(1, "dog", "いぬ")
+    assert wd.items(1) == frozenset({("cat", "ねこ"), ("dog", "いぬ")})
+    wd.remove(1, "cat")
+    assert wd.items(1) == frozenset({("dog", "いぬ")})
+    wd.import_dict(1, {"x": "えっくす"}, replace=True)
+    assert wd.items(1) == frozenset({("x", "えっくす")})
