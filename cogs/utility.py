@@ -18,7 +18,7 @@ _HELP_DATA = [
         ("`/join` `!join`", "VCに参加して読み上げ開始"),
         ("`/leave` `!leave`", "VCから退出 (aliases: `!quit`, `!stop`, `!bye`, `!exit`)"),
         ("`/skip` `!skip`", "現在の再生をスキップ"),
-        ("`/speed` `!speed` [倍率]", "読み上げ速度を変更 (0.5–2.0)"),
+        ("`/speed` `!speed` [倍率]", "読み上げ速度を変更 (0.5–2.0、要サーバー管理)"),
     ]),
     ("🎤 ボイス設定", [
         ("`/myvoice list`", "利用可能なスピーカー一覧を表示"),
@@ -30,7 +30,7 @@ _HELP_DATA = [
     ("📢 チャンネル・辞書", [
         ("`/listen <add|remove|list>`", "読み上げチャンネルの管理"),
         ("`/dict <add|remove|list>`", "読み替え辞書の管理"),
-        ("`/dict <export|import>`", "辞書の書き出し・読み込み"),
+        ("`/dict <export|import>`", "辞書の書き出し・読み込み (import は要サーバー管理)"),
     ]),
     ("👑 管理・オーナー", [
         ("`/reload_speakers`", "スピーカー情報を再取得"),

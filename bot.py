@@ -11,6 +11,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# 権限名 → 表示名（案内メッセージ用）
+_PERMISSION_LABELS = {"manage_guild": "サーバー管理"}
+
+
+def _user_error_message(error: Exception) -> str | None:
+    """ユーザーへ案内すべき操作エラーなら表示用メッセージを返す"""
+    if isinstance(error, (commands.MissingPermissions, app_commands.MissingPermissions)):
+        names = "・".join(_PERMISSION_LABELS.get(p, p) for p in error.missing_permissions)
+        return f"⛔ このコマンドを使うには「{names}」権限が必要です。"
+    if isinstance(error, (commands.NoPrivateMessage, app_commands.NoPrivateMessage)):
+        return "⛔ このコマンドはサーバー内でのみ使えます。"
+    return None
+
 # load_dotenv() 後に import することで環境変数を確実に読み込む
 from webhook_logger import WebhookLogger  # noqa: E402
 from user_store import UserVoiceStore  # noqa: E402
@@ -136,6 +149,12 @@ class YomiageBot(commands.Bot):
             commands.MissingPermissions,
         )
         if isinstance(original, _ignored):
+            msg = _user_error_message(original)
+            if msg:
+                try:
+                    await ctx.send(msg, ephemeral=True)
+                except discord.HTTPException:
+                    pass
             return
         print(f"[CMD ERROR] {ctx.command}: {original}")
         await self.webhook.send(
@@ -164,6 +183,15 @@ class YomiageBot(commands.Bot):
             app_commands.CommandOnCooldown,
         )
         if isinstance(original, _ignored):
+            msg = _user_error_message(original)
+            if msg:
+                try:
+                    if inter.response.is_done():
+                        await inter.followup.send(msg, ephemeral=True)
+                    else:
+                        await inter.response.send_message(msg, ephemeral=True)
+                except discord.HTTPException:
+                    pass
             return
         cmd_name = getattr(inter.command, "name", "不明")
         print(f"[APP CMD ERROR] {cmd_name}: {original}")

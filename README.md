@@ -375,7 +375,6 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | `!myvoice reset` / `/myvoice reset` | デフォルト（ずんだもん ノーマル）に戻す |
 | `!voice <ID>` / `/voice <ID>` | `!myvoice set` の短縮形 |
 | `!ignore me` / `/ignore me` | 自分のメッセージをこのサーバーで読み上げ対象外にする（もう一度実行で解除） |
-| `!speed <値>` / `/speed <値>` | サーバー全体の読み上げ速度を変更（0.5〜2.0） |
 
 > 💡 ボイス設定はユーザーごとに独立しています。未設定のユーザーは **ずんだもん ノーマル（ID: 3）** が使われます。
 
@@ -383,6 +382,8 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 
 | コマンド | 権限 | 説明 |
 |---|---|---|
+| `!speed <値>` / `/speed <値>` | サーバー管理 | サーバー全体の読み上げ速度を変更（0.5〜2.0） |
+| `!dict import` / `/dict import` | サーバー管理 | 辞書のインポート（詳細は「読み替え辞書」を参照） |
 | `!reload_speakers` / `/reload_speakers` | サーバー管理 | VOICEVOXのスピーカー情報キャッシュを再取得（ENGINE更新後などに使用） |
 | `!autojoin add <VC> [#ch]` / `/autojoin add <vc> [text]` | サーバー管理 | VC に人が入ったら自動参加して指定チャンネルを読み上げる（省略時は VC 内チャット） |
 | `!autojoin remove <VC>` / `/autojoin remove <vc>` | サーバー管理 | 自動参加の登録を解除 |
@@ -391,6 +392,9 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | `!ignore remove <@user>` / `/ignore remove <user>` | サーバー管理 | 読み上げ除外を解除 |
 | `!ignore list` / `/ignore list` | サーバー管理 | 読み上げ除外ユーザーを一覧表示（実行者のみに表示） |
 | `!readname <true\|false>` / `/readname <enabled>` | サーバー管理 | 「〇〇さん、本文」のように発言者名を付けて読み上げる（標準は OFF・同じ人の連続投稿では省略） |
+
+> 💡 権限が足りない場合は、実行した本人にだけ案内メッセージが表示されます。
+> `/speed`・`/autojoin`・`/readname`・`/reload_speakers` は、サーバー管理権限のないメンバーのスラッシュコマンド一覧には表示されません。サーバー設定 →「連携サービス」→ この Bot から表示する人をさらに絞り込めますが、実行には常にサーバー管理権限が必要です。`/dict import` と `/ignore add・remove・list` は、同じグループに誰でも使えるコマンドがあるため一覧に表示されますが、実行時に権限を確認します。
 
 ### オーナー向け
 
@@ -439,7 +443,7 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | `!dict remove <単語>` / `/dict remove` | 読み替えを削除 |
 | `!dict list` / `/dict list` | 辞書の一覧を表示 |
 | `!dict export` / `/dict export` | 辞書をJSONファイルとしてダウンロード |
-| `!dict import` / `/dict import` | JSONファイルを添付して辞書をインポート（デフォルト: 既存にマージ） |
+| `!dict import` / `/dict import` | JSONファイルを添付して辞書をインポート（デフォルト: 既存にマージ・サーバー管理権限が必要） |
 | `!dict import true` / `/dict import replace:True` | 既存辞書を全置換してインポート |
 
 <details>

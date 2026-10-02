@@ -609,8 +609,10 @@ class TTS(commands.Cog):
         vc.stop()
         await ctx.send("⏭️ スキップしました。")
 
-    @commands.hybrid_command(name="speed", description="サーバー全体の読み上げ速度を変更します（0.5〜2.0）")
+    @commands.hybrid_command(name="speed", description="サーバー全体の読み上げ速度を変更します（0.5〜2.0、サーバー管理権限が必要）")
     @app_commands.describe(value="速度倍率（0.5〜2.0）")
+    @app_commands.default_permissions(manage_guild=True)
+    @commands.has_permissions(manage_guild=True)
     async def speed(self, ctx: commands.Context, value: float):
         if not 0.5 <= value <= 2.0:
             await ctx.send("速度は 0.5〜2.0 の範囲で指定してください。", ephemeral=True)
@@ -892,6 +894,7 @@ class TTS(commands.Cog):
             await ctx_or_inter.send(f"📤 辞書をエクスポートしました（{len(d)}件）", file=file)
 
     @dict_group.command(name="import")
+    @commands.has_permissions(manage_guild=True)
     async def dict_import_prefix(self, ctx: commands.Context, replace: bool = False):
         if not ctx.message.attachments:
             await ctx.send("⚠️ JSONファイルを添付してください。")
@@ -899,7 +902,8 @@ class TTS(commands.Cog):
         await ctx.defer()
         await self._dict_import(ctx, ctx.message.attachments[0], replace)
 
-    @dict_app.command(name="import", description="JSONファイルから辞書をインポートします")
+    @dict_app.command(name="import", description="JSONファイルから辞書をインポートします（サーバー管理権限が必要）")
+    @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.describe(
         file="インポートするJSONファイル",
         replace="True で既存辞書を全置換（デフォルト: False でマージ）",
@@ -1001,7 +1005,11 @@ class TTS(commands.Cog):
     async def autojoin_group(self, ctx: commands.Context):
         await ctx.send_help(ctx.command)
 
-    autojoin_app = app_commands.Group(name="autojoin", description="VC への自動参加の管理（サーバー管理権限が必要）")
+    autojoin_app = app_commands.Group(
+        name="autojoin",
+        description="VC への自動参加の管理（サーバー管理権限が必要）",
+        default_permissions=discord.Permissions(manage_guild=True),
+    )
 
     @autojoin_group.command(name="add")
     @commands.has_permissions(manage_guild=True)
@@ -1157,6 +1165,7 @@ class TTS(commands.Cog):
 
     @commands.hybrid_command(name="readname", description="発言者の名前を読み上げるかを切り替えます（サーバー管理権限が必要）")
     @app_commands.describe(enabled="True で名前を読み上げる / False で読み上げない")
+    @app_commands.default_permissions(manage_guild=True)
     @commands.has_permissions(manage_guild=True)
     async def readname(self, ctx: commands.Context, enabled: bool):
         self.guild_settings.set_read_name(_require_guild(ctx).id, enabled)
@@ -1277,6 +1286,7 @@ class TTS(commands.Cog):
     # ------------------------------------------------------------------ #
 
     @commands.hybrid_command(name="reload_speakers", description="スピーカー一覧キャッシュを更新します（VOICEVOX再起動後に使用）")
+    @app_commands.default_permissions(manage_guild=True)
     @commands.has_permissions(manage_guild=True)
     async def reload_speakers(self, ctx: commands.Context):
         await ctx.defer(ephemeral=True)
