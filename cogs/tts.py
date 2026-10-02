@@ -1,11 +1,8 @@
-"""TTS Cog — 読み上げ機能の全コマンドとイベントハンドラ"""
+"""TTS Cog — 読み上げ機能の全コマンドとイベントハンドラ（合成・再生は tts_pipeline）"""
 
 import asyncio
-import collections
 import io
-import wave
 import json
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import discord
@@ -15,8 +12,10 @@ from discord.ext import commands
 from channel_store import ChannelStore, WordDict
 from config import get_config
 from discord_helpers import send_group_usage, send_response
+from discord_helpers import voice_client_of as _voice_client
 from guild_settings import GuildSettingsStore
 from text_filter import filter_message
+from tts_pipeline import PlaybackManager, SpeechSynthesizer, TTSItem
 from voicevox import VoicevoxClient, VoicevoxError
 
 if TYPE_CHECKING:
@@ -24,13 +23,6 @@ if TYPE_CHECKING:
 
 # Discord メッセージの安全な最大文字数
 _DISCORD_MAX = 1900
-
-# PCM キャッシュの上限（48kHz stereo s16le は 1秒あたり約 192KB）
-_PCM_CACHE_MAX = 100
-_PCM_CACHE_MAX_BYTES = 64 * 1024 * 1024
-
-# VOICEVOX への同時合成リクエスト数（ギルド数が増えてもエンジン VM を過負荷にしない）
-_SYNTH_CONCURRENCY = 2
 
 # 読み替え辞書の上限（巨大入力による負荷・メモリ消費を防ぐ）
 _DICT_IMPORT_MAX_BYTES = 1024 * 1024
@@ -70,20 +62,6 @@ def _validate_dict_entry(word: str, reading: str) -> str | None:
     return None
 
 
-def _extract_discord_pcm(wav_bytes: bytes) -> bytes | None:
-    """WAV が既に Discord 形式（48kHz stereo s16le 非圧縮）ならヘッダを除いた PCM を返す。
-    形式が異なる・解析できない・空の場合は None（FFmpeg 変換へフォールバック）。
-    """
-    try:
-        with wave.open(io.BytesIO(wav_bytes), "rb") as w:
-            if (w.getframerate(), w.getnchannels(), w.getsampwidth(), w.getcomptype()) != (48000, 2, 2, "NONE"):
-                return None
-            pcm = w.readframes(w.getnframes())
-    except (wave.Error, EOFError):
-        return None
-    return pcm or None
-
-
 def _dict_json_file(guild_id: int, d: dict[str, str]) -> discord.File:
     """辞書を本Bot形式の JSON ファイルにする（export / 件数の多い list で共用）"""
     payload = {
@@ -100,12 +78,6 @@ def _require_guild(ctx_or_inter: commands.Context | discord.Interaction) -> disc
     if guild is None:
         raise commands.NoPrivateMessage()
     return guild
-
-
-def _voice_client(guild: discord.Guild) -> discord.VoiceClient | None:
-    """guild.voice_client は VoiceProtocol 型のため VoiceClient に絞り込んで返す"""
-    vc = guild.voice_client
-    return vc if isinstance(vc, discord.VoiceClient) else None
 
 
 def _listen_permission_error(
@@ -130,45 +102,6 @@ def _listen_permission_error(
     return None
 
 
-async def _wav_to_pcm(wav_bytes: bytes) -> bytes:
-    """VOICEVOX出力WAVをDiscord用PCM(48kHz stereo s16le)に変換する。
-    VOICEVOX に 48kHz stereo を指定しているため通常はヘッダ除去のみで済む。
-    それ以外の形式（旧エンジン等）の場合のみ FFmpeg で変換する。
-    変換はsynthesizerタスク内で1回だけ実行し、結果をキャッシュする。
-    playerタスクはdiscord.PCMAudioで直接再生するためFFmpegプロセスを起動しない。
-
-    ffmpeg が異常終了した場合や出力が空の場合は RuntimeError を送出する。
-    これを怠ると空の PCM がキャッシュに保存され、同じテキストが以後ずっと
-    無音再生になってしまう。
-    """
-    pcm = _extract_discord_pcm(wav_bytes)
-    if pcm is not None:
-        return pcm
-
-    proc = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-i", "pipe:0",
-        "-f", "s16le", "-ar", "48000", "-ac", "2",
-        "-threads", "1",
-        "-loglevel", "error", "pipe:1",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    pcm, stderr = await proc.communicate(wav_bytes)
-    if proc.returncode != 0 or not pcm:
-        detail = stderr.decode("utf-8", errors="replace").strip() or "出力が空です"
-        raise RuntimeError(f"ffmpeg 変換に失敗しました（code={proc.returncode}）: {detail}")
-    return pcm
-
-
-@dataclass
-class TTSItem:
-    """キューに積む読み上げ1件分のデータ（enqueue時点で解決済み）"""
-    text: str
-    speaker_id: int
-    speed: float
-
-
 class TTS(commands.Cog):
     def __init__(self, bot: "YomiageBot"):
         self.bot = bot
@@ -186,17 +119,12 @@ class TTS(commands.Cog):
         # UserVoiceStore は bot 側で管理し、Owner Cog と共有
         self.user_voice = bot.user_voice_store
 
+        # 合成（キャッシュ・合成共有、ギルド横断）と、ギルドごとの再生キュー・ワーカー
+        self.synthesizer = SpeechSynthesizer(self.voicevox)
+        self.playback = PlaybackManager(bot, self.synthesizer)
+
         # guild_id → speed(float)
         self._speed: dict[int, float] = {}
-
-        # guild_id → asyncio.Queue[TTSItem]  (メッセージキュー)
-        self._queues: dict[int, asyncio.Queue] = {}
-
-        # guild_id → asyncio.Queue[io.BytesIO]  (再生待ちPCMキュー、最大2件先読み)
-        self._pcm_queues: dict[int, asyncio.Queue] = {}
-
-        # guild_id → (synthesizer_task, player_task)
-        self._workers: dict[int, tuple[asyncio.Task | None, asyncio.Task | None]] = {}
 
         # guild_id → auto-leave task（誰もいなくなったら5秒後に退出）
         self._auto_leave_tasks: dict[int, asyncio.Task] = {}
@@ -211,18 +139,6 @@ class TTS(commands.Cog):
         self._speakers_cache: list[dict] | None = None
         self._speaker_id_map: dict[int, tuple[str, str]] | None = None  # id → (char, style)
         self._speakers_lock = asyncio.Lock()
-
-        # PCM LRU キャッシュ (text, speaker_id, speed) → 48kHz stereo s16le bytes
-        # キャッシュヒット時はFFmpeg変換・VOICEVOX合成いずれも省略
-        self._pcm_cache: collections.OrderedDict[tuple, bytes] = collections.OrderedDict()
-        self._pcm_cache_bytes = 0
-
-        # in-flight dedup: 合成中キーを共有 Task で管理（ギルド横断共有）
-        # 同じ (text, speaker_id, speed) が既に合成中なら Task を shield して待つ。
-        # Task はどのギルドのワーカーにも所有されないため、/leave でワーカーが
-        # キャンセルされても合成は継続し、他ギルドの待機が停止しない
-        self._in_flight: dict[tuple, asyncio.Task[bytes]] = {}
-        self._synth_sem = asyncio.Semaphore(_SYNTH_CONCURRENCY)
 
         # ウォームアップ Task の参照（GC による途中消失を防ぎ、unload 時にキャンセルする）
         self._warmup_task: asyncio.Task[None] | None = None
@@ -245,14 +161,7 @@ class TTS(commands.Cog):
     async def cog_unload(self):
         """シャットダウン: タスクキャンセル → gather → in_flight クリア → セッションクローズ"""
         # 1. 全タスクをキャンセル
-        tasks: list[asyncio.Task] = []
-        for synth, play in self._workers.values():
-            if synth and not synth.done():
-                synth.cancel()
-                tasks.append(synth)
-            if play and not play.done():
-                play.cancel()
-                tasks.append(play)
+        tasks: list[asyncio.Task] = list(self.playback.cancel_all())
         for task in self._auto_leave_tasks.values():
             if not task.done():
                 task.cancel()
@@ -261,11 +170,8 @@ class TTS(commands.Cog):
             self._warmup_task.cancel()
             tasks.append(self._warmup_task)
 
-        # 2. 共有合成 Task をキャンセル（完了時コールバックで _in_flight から外れる）
-        for task in self._in_flight.values():
-            if not task.done():
-                task.cancel()
-                tasks.append(task)
+        # 2. 共有合成 Task をキャンセル（完了時コールバックで in_flight から外れる）
+        tasks.extend(self.synthesizer.cancel_all())
 
         # 3. キャンセルが処理されるまで待機（finally ブロックの実行を保証）
         if tasks:
@@ -277,13 +183,8 @@ class TTS(commands.Cog):
     async def _warmup(self):
         """起動後に短文を事前合成してキャッシュ & VOICEVOXエンジンのモデルをウォームアップする"""
         await asyncio.sleep(3)  # Bot接続が安定するまで待機
-        key = ("接続しました", self.default_speaker, self.default_speed)
-        if key in self._pcm_cache:
-            return
         try:
-            wav = await self.voicevox.synthesis("接続しました", self.default_speaker, self.default_speed)
-            pcm = await _wav_to_pcm(wav)
-            self._cache_put(key, pcm)
+            await self.synthesizer.warmup(TTSItem("接続しました", self.default_speaker, self.default_speed))
             print("[TTS] VOICEVOXウォームアップ完了（「接続しました」をキャッシュ）")
         except Exception as e:
             print(f"[TTS] VOICEVOXウォームアップ失敗（起動直後は正常）: {e}")
@@ -295,52 +196,13 @@ class TTS(commands.Cog):
     def _guild_speed(self, guild_id: int) -> float:
         return self._speed.get(guild_id, self.default_speed)
 
-    def _get_queue(self, guild_id: int) -> asyncio.Queue:
-        if guild_id not in self._queues:
-            self._queues[guild_id] = asyncio.Queue(maxsize=50)
-        return self._queues[guild_id]
-
-    def _get_pcm_queue(self, guild_id: int) -> asyncio.Queue:
-        if guild_id not in self._pcm_queues:
-            # 最大2件先読みして再生待ちPCMをバッファリング
-            self._pcm_queues[guild_id] = asyncio.Queue(maxsize=2)
-        return self._pcm_queues[guild_id]
-
-    def _ensure_worker(self, guild_id: int):
-        synth, play = self._workers.get(guild_id, (None, None))
-        if synth is None or synth.done():
-            synth = asyncio.create_task(
-                self._synthesizer(guild_id), name=f"synth-{guild_id}"
-            )
-        if play is None or play.done():
-            play = asyncio.create_task(
-                self._player(guild_id), name=f"player-{guild_id}"
-            )
-        self._workers[guild_id] = (synth, play)
-
-    def _cancel_workers(self, guild_id: int):
-        """合成タスクと再生タスクをキャンセルしてキューを空にする"""
-        synth, play = self._workers.pop(guild_id, (None, None))
-        if synth:
-            synth.cancel()
-        if play:
-            play.cancel()
-        for q in (self._queues.pop(guild_id, None), self._pcm_queues.pop(guild_id, None)):
-            if q:
-                while not q.empty():
-                    try:
-                        q.get_nowait()
-                        q.task_done()
-                    except Exception:
-                        pass
-
     def _reset_guild_session(self, guild_id: int):
         """VC から退出したときの後片付け（読み上げチャンネル・速度・ワーカーをリセット）"""
         self._cancel_auto_leave(guild_id)
         self.channel_store.clear(guild_id)
         self._speed.pop(guild_id, None)
         self._last_author.pop(guild_id, None)
-        self._cancel_workers(guild_id)
+        self.playback.stop(guild_id)
 
     def _cancel_auto_leave(self, guild_id: int):
         """スケジュール済みの自動退出タスクをキャンセルする"""
@@ -378,127 +240,6 @@ class TTS(commands.Cog):
                 context={"guild_id": str(guild_id)},
             )
 
-    def _get_or_start_synthesis(self, cache_key: tuple, item: TTSItem) -> asyncio.Task[bytes]:
-        """cache_key の共有合成 Task を返す。未開始なら開始する"""
-        task = self._in_flight.get(cache_key)
-        if task is None:
-            task = asyncio.create_task(
-                self._synthesize_pcm(cache_key, item), name="tts-shared-synthesis"
-            )
-            self._in_flight[cache_key] = task
-            task.add_done_callback(
-                lambda t, key=cache_key: self._on_synthesis_done(key, t)
-            )
-        return task
-
-    def _on_synthesis_done(self, cache_key: tuple, task: asyncio.Task[bytes]) -> None:
-        if self._in_flight.get(cache_key) is task:
-            del self._in_flight[cache_key]
-        # 待機ワーカーが全員キャンセル済みでも "exception was never retrieved" を出さない
-        if not task.cancelled():
-            task.exception()
-
-    async def _synthesize_pcm(self, cache_key: tuple, item: TTSItem) -> bytes:
-        """VOICEVOX 合成 → PCM 変換し、キャッシュへ保存して返す"""
-        async with self._synth_sem:
-            wav_bytes = await self.voicevox.synthesis(item.text, item.speaker_id, item.speed)
-        pcm_bytes = await _wav_to_pcm(wav_bytes)
-        # キャッシュ更新（VC切断に関わらず次回のために保存）
-        self._cache_put(cache_key, pcm_bytes)
-        return pcm_bytes
-
-    def _cache_put(self, key: tuple, pcm: bytes) -> None:
-        """PCM を LRU キャッシュに保存し、件数・合計バイト数の上限まで古い順に破棄する"""
-        old = self._pcm_cache.pop(key, None)
-        if old is not None:
-            self._pcm_cache_bytes -= len(old)
-        if len(pcm) > _PCM_CACHE_MAX_BYTES:
-            return  # 単体で上限を超える音声はキャッシュしない
-        self._pcm_cache[key] = pcm
-        self._pcm_cache_bytes += len(pcm)
-        while (
-            len(self._pcm_cache) > _PCM_CACHE_MAX
-            or self._pcm_cache_bytes > _PCM_CACHE_MAX_BYTES
-        ):
-            _, evicted = self._pcm_cache.popitem(last=False)
-            self._pcm_cache_bytes -= len(evicted)
-
-    async def _synthesizer(self, guild_id: int):
-        """メッセージキューからTTSItemを取り出し、PCMに変換してPCMキューに積む"""
-        msg_q = self._get_queue(guild_id)
-        pcm_q = self._get_pcm_queue(guild_id)
-        while True:
-            item: TTSItem = await msg_q.get()
-            try:
-                guild = self.bot.get_guild(guild_id)
-                if guild is None or guild.voice_client is None:
-                    continue
-
-                cache_key = (item.text, item.speaker_id, item.speed)
-
-                # キャッシュヒット確認（awaitを挟まないので安全）
-                if cache_key in self._pcm_cache:
-                    self._pcm_cache.move_to_end(cache_key)
-                    pcm_bytes = self._pcm_cache[cache_key]
-                else:
-                    # 新規合成、または別ギルドが合成中の共有 Task を待つ。
-                    # shield によりこのワーカーのキャンセルは Task へ伝播しない
-                    task = self._get_or_start_synthesis(cache_key, item)
-                    pcm_bytes = await asyncio.shield(task)
-
-                    # 合成後にVC接続を確認（合成中に切断された場合は再生をスキップ）
-                    if guild.voice_client is None:
-                        continue
-
-                await pcm_q.put(pcm_bytes)
-            except VoicevoxError as e:
-                print(f"[VOICEVOX ERROR] {e}")
-                await self.bot.webhook.send(
-                    "warning", "VOICEVOX 合成エラー", str(e),
-                    context={"guild_id": str(guild_id)},
-                )
-            except Exception as e:
-                print(f"[SYNTH ERROR] {e}")
-                await self.bot.webhook.send(
-                    "error", "合成タスク エラー", exc=e,
-                    context={"guild_id": str(guild_id)},
-                )
-            finally:
-                msg_q.task_done()
-
-    async def _player(self, guild_id: int):
-        """PCMキューから音声を取り出してVCで直接再生する（FFmpegプロセス不要）"""
-        pcm_q = self._get_pcm_queue(guild_id)
-        loop = asyncio.get_running_loop()
-        while True:
-            pcm: bytes = await pcm_q.get()
-            try:
-                guild = self.bot.get_guild(guild_id)
-                vc = _voice_client(guild) if guild else None
-                if vc and vc.is_connected():
-                    event = asyncio.Event()
-                    play_error: list[Exception | None] = [None]
-
-                    def _after(err, *, _ev=event, _eh=play_error):
-                        _eh[0] = err
-                        loop.call_soon_threadsafe(_ev.set)
-
-                    # discord.PCMAudio はチャンネルのビットレート（128kbps等）を
-                    # discord.py のOpusエンコーダが自動参照するため指定不要
-                    source = discord.PCMAudio(io.BytesIO(pcm))
-                    vc.play(source, after=_after)
-                    await event.wait()
-                    if play_error[0]:
-                        raise play_error[0]
-            except Exception as e:
-                print(f"[PLAYER ERROR] {e}")
-                await self.bot.webhook.send(
-                    "warning", "再生エラー", exc=e,
-                    context={"guild_id": str(guild_id)},
-                )
-            finally:
-                pcm_q.task_done()
-
     async def _join_vc(self, voice_channel: discord.VoiceChannel | discord.StageChannel):
         """VCに参加してワーカーを起動する共通処理"""
         guild_id = voice_channel.guild.id
@@ -511,7 +252,7 @@ class TTS(commands.Cog):
         else:
             vc = await voice_channel.connect(self_deaf=True)
 
-        self._ensure_worker(guild_id)
+        self.playback.ensure_workers(guild_id)
         return vc, True
 
     def _enqueue_announce(self, guild_id: int, text: str):
@@ -521,20 +262,7 @@ class TTS(commands.Cog):
             speaker_id=self.default_speaker,
             speed=self._guild_speed(guild_id),
         )
-        self._enqueue_item(guild_id, item)
-
-    def _enqueue_item(self, guild_id: int, item: TTSItem):
-        """メッセージキューに積む（満杯なら最古を捨てる）"""
-        q = self._get_queue(guild_id)
-        if q.full():
-            try:
-                q.get_nowait()
-                # 捨てた要素も処理済みとして数え、未完了カウンタのずれを防ぐ
-                q.task_done()
-            except asyncio.QueueEmpty:
-                pass
-        q.put_nowait(item)
-        self._ensure_worker(guild_id)
+        self.playback.enqueue(guild_id, item)
 
     async def _ensure_speakers_cache(self) -> bool:
         """スピーカーキャッシュを初回のみフェッチする。成功で True、失敗で False"""
@@ -1227,7 +955,7 @@ class TTS(commands.Cog):
         """サーバーから退出・キックされたら、そのサーバーのデータを削除する"""
         guild_id = guild.id
         self._cancel_auto_leave(guild_id)
-        self._cancel_workers(guild_id)
+        self.playback.stop(guild_id)
         self._speed.pop(guild_id, None)
         self._last_author.pop(guild_id, None)
         self._autojoin_locks.pop(guild_id, None)
@@ -1279,7 +1007,7 @@ class TTS(commands.Cog):
             speaker_id=self._effective_speaker(message.author.id),
             speed=self._guild_speed(message.guild.id),
         )
-        self._enqueue_item(message.guild.id, item)
+        self.playback.enqueue(message.guild.id, item)
 
     # ------------------------------------------------------------------ #
     # Admin commands

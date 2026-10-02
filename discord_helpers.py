@@ -4,6 +4,12 @@ import discord
 from discord.ext import commands
 
 
+def voice_client_of(guild: discord.Guild) -> discord.VoiceClient | None:
+    """guild.voice_client は VoiceProtocol 型のため VoiceClient に絞り込んで返す"""
+    vc = guild.voice_client
+    return vc if isinstance(vc, discord.VoiceClient) else None
+
+
 async def send_response(
     ctx_or_inter: commands.Context | discord.Interaction,
     msg: str,

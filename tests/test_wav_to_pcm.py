@@ -1,7 +1,7 @@
 import io
 import wave
 
-from cogs.tts import _extract_discord_pcm
+from tts_pipeline import extract_discord_pcm as _extract_discord_pcm
 
 
 def _make_wav(rate: int, channels: int, frames: bytes) -> bytes:

@@ -7,7 +7,9 @@ import discord
 import pytest
 
 import cogs.tts as tts_mod
-from cogs.tts import TTS, TTSItem
+import tts_pipeline
+from cogs.tts import TTS
+from tts_pipeline import TTSItem
 from guild_settings import GuildSettingsStore
 
 if TYPE_CHECKING:
@@ -38,7 +40,7 @@ def cog(monkeypatch: pytest.MonkeyPatch):
     async def fake_pcm(wav: bytes) -> bytes:
         return b"pcm:" + wav
 
-    monkeypatch.setattr(tts_mod, "_wav_to_pcm", fake_pcm)
+    monkeypatch.setattr(tts_pipeline, "wav_to_pcm", fake_pcm)
     c = _make_cog()
     yield c
 
@@ -53,12 +55,12 @@ async def test_cancelling_one_guild_does_not_hang_other_guild(cog: TTS, monkeypa
 
     monkeypatch.setattr(cog.voicevox, "synthesis", fake_synthesis)
     item = TTSItem(text="こんにちは", speaker_id=3, speed=1.0)
-    cog._get_queue(1).put_nowait(item)
-    cog._get_queue(2).put_nowait(item)
+    cog.playback.message_queue(1).put_nowait(item)
+    cog.playback.message_queue(2).put_nowait(item)
 
-    w1 = asyncio.create_task(cog._synthesizer(1))
+    w1 = asyncio.create_task(cog.playback.synthesis_worker(1))
     await asyncio.sleep(0.01)  # ギルド1が合成を開始
-    w2 = asyncio.create_task(cog._synthesizer(2))
+    w2 = asyncio.create_task(cog.playback.synthesis_worker(2))
     await asyncio.sleep(0.01)  # ギルド2が同一キーの合成待ちに入る
 
     w1.cancel()  # /leave 相当
@@ -66,10 +68,10 @@ async def test_cancelling_one_guild_does_not_hang_other_guild(cog: TTS, monkeypa
     release.set()
 
     try:
-        pcm = await asyncio.wait_for(cog._get_pcm_queue(2).get(), timeout=1.0)
+        pcm = await asyncio.wait_for(cog.playback.pcm_queue(2).get(), timeout=1.0)
         assert pcm == b"pcm:wav"
         await asyncio.sleep(0)
-        assert not cog._in_flight
+        assert not cog.synthesizer.in_flight
     finally:
         w2.cancel()
         await asyncio.gather(w2, return_exceptions=True)
@@ -85,18 +87,18 @@ async def test_synthesis_failure_is_reported_to_all_waiters(cog: TTS, monkeypatc
         calls += 1
         await asyncio.sleep(0.01)
         if text == "失敗":
-            raise tts_mod.VoicevoxError("boom")
+            raise tts_pipeline.VoicevoxError("boom")
         return b"ok"
 
     monkeypatch.setattr(cog.voicevox, "synthesis", fake_synthesis)
     for gid in (1, 2):
-        cog._get_queue(gid).put_nowait(TTSItem(text="失敗", speaker_id=3, speed=1.0))
-        cog._get_queue(gid).put_nowait(TTSItem(text="成功", speaker_id=3, speed=1.0))
+        cog.playback.message_queue(gid).put_nowait(TTSItem(text="失敗", speaker_id=3, speed=1.0))
+        cog.playback.message_queue(gid).put_nowait(TTSItem(text="成功", speaker_id=3, speed=1.0))
 
-    workers = [asyncio.create_task(cog._synthesizer(gid)) for gid in (1, 2)]
+    workers = [asyncio.create_task(cog.playback.synthesis_worker(gid)) for gid in (1, 2)]
     try:
         for gid in (1, 2):
-            pcm = await asyncio.wait_for(cog._get_pcm_queue(gid).get(), timeout=1.0)
+            pcm = await asyncio.wait_for(cog.playback.pcm_queue(gid).get(), timeout=1.0)
             assert pcm == b"pcm:ok"
         assert calls == 2  # 同一キーは共有され、各テキスト1回ずつ合成
     finally:
@@ -115,20 +117,20 @@ async def test_unload_cancels_shared_synthesis(cog: TTS, monkeypatch: pytest.Mon
         return b""
 
     monkeypatch.setattr(cog.voicevox, "synthesis", fake_synthesis)
-    cog._get_queue(1).put_nowait(TTSItem(text="長文", speaker_id=3, speed=1.0))
-    cog._ensure_worker(1)
+    cog.playback.message_queue(1).put_nowait(TTSItem(text="長文", speaker_id=3, speed=1.0))
+    cog.playback.ensure_workers(1)
     await asyncio.wait_for(started.wait(), timeout=1.0)
 
     await asyncio.wait_for(cog.cog_unload(), timeout=1.0)
-    assert not cog._in_flight
+    assert not cog.synthesizer.in_flight
 
 
 async def test_dropping_oldest_keeps_unfinished_count(cog: TTS, monkeypatch: pytest.MonkeyPatch) -> None:
     """満杯時に最古を捨てても未完了カウンタがずれず join が完了すること"""
-    monkeypatch.setattr(cog, "_ensure_worker", lambda _gid: None)
-    q = cog._get_queue(1)
+    monkeypatch.setattr(cog.playback, "ensure_workers", lambda _gid: None)
+    q = cog.playback.message_queue(1)
     for i in range(q.maxsize + 1):
-        cog._enqueue_item(1, TTSItem(text=str(i), speaker_id=3, speed=1.0))
+        cog.playback.enqueue(1, TTSItem(text=str(i), speaker_id=3, speed=1.0))
 
     assert q.qsize() == q.maxsize
     assert q.get_nowait().text == "1"  # 最古の "0" が捨てられている
@@ -140,20 +142,20 @@ async def test_dropping_oldest_keeps_unfinished_count(cog: TTS, monkeypatch: pyt
 
 
 def test_pcm_cache_is_bounded_by_bytes(cog: TTS, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tts_mod, "_PCM_CACHE_MAX_BYTES", 10)
-    cog._cache_put(("a",), b"1234")
-    cog._cache_put(("b",), b"1234")
-    cog._cache_put(("c",), b"1234")  # 合計 12 > 10 で最古の a を破棄
-    assert list(cog._pcm_cache) == [("b",), ("c",)]
-    assert cog._pcm_cache_bytes == 8
+    monkeypatch.setattr(tts_pipeline, "PCM_CACHE_MAX_BYTES", 10)
+    cog.synthesizer.cache_put(("a", 3, 1.0), b"1234")
+    cog.synthesizer.cache_put(("b", 3, 1.0), b"1234")
+    cog.synthesizer.cache_put(("c", 3, 1.0), b"1234")  # 合計 12 > 10 で最古の a を破棄
+    assert list(cog.synthesizer.cache) == [("b", 3, 1.0), ("c", 3, 1.0)]
+    assert cog.synthesizer.cache_bytes == 8
 
-    cog._cache_put(("b",), b"12")  # 上書き時は旧サイズを差し引く
-    assert cog._pcm_cache_bytes == 6
-    assert list(cog._pcm_cache) == [("c",), ("b",)]
+    cog.synthesizer.cache_put(("b", 3, 1.0), b"12")  # 上書き時は旧サイズを差し引く
+    assert cog.synthesizer.cache_bytes == 6
+    assert list(cog.synthesizer.cache) == [("c", 3, 1.0), ("b", 3, 1.0)]
 
-    cog._cache_put(("big",), b"x" * 11)  # 単体で上限超過はキャッシュしない
-    assert ("big",) not in cog._pcm_cache
-    assert cog._pcm_cache_bytes == 6
+    cog.synthesizer.cache_put(("big", 3, 1.0), b"x" * 11)  # 単体で上限超過はキャッシュしない
+    assert ("big", 3, 1.0) not in cog.synthesizer.cache
+    assert cog.synthesizer.cache_bytes == 6
 
 
 async def test_synthesis_concurrency_is_limited(cog: TTS, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,11 +172,11 @@ async def test_synthesis_concurrency_is_limited(cog: TTS, monkeypatch: pytest.Mo
 
     monkeypatch.setattr(cog.voicevox, "synthesis", fake_synthesis)
     tasks = [
-        cog._get_or_start_synthesis((str(i), 3, 1.0), TTSItem(text=str(i), speaker_id=3, speed=1.0))
+        cog.synthesizer.get_or_start(TTSItem(text=str(i), speaker_id=3, speed=1.0))
         for i in range(6)
     ]
     await asyncio.wait_for(asyncio.gather(*tasks), timeout=1.0)
-    assert peak == tts_mod._SYNTH_CONCURRENCY
+    assert peak == tts_pipeline.SYNTH_CONCURRENCY
     await cog.cog_unload()
 
 
@@ -258,7 +260,7 @@ async def test_ignored_user_message_is_not_read(
     cog.guild_settings.add_ignored(1, 5)
     monkeypatch.setattr(cog, "channel_store", _FakeChannelStore({20}))
     queued: list[str] = []
-    monkeypatch.setattr(cog, "_enqueue_item", lambda gid, item: queued.append(item.text))
+    monkeypatch.setattr(cog.playback, "enqueue", lambda gid, item: queued.append(item.text))
 
     def message(author_id: int) -> discord.Message:
         return cast(discord.Message, SimpleNamespace(
@@ -280,7 +282,7 @@ async def test_read_name_prefixes_name_except_consecutive(
     cog.guild_settings.set_read_name(1, True)
     monkeypatch.setattr(cog, "channel_store", _FakeChannelStore({20}))
     queued: list[str] = []
-    monkeypatch.setattr(cog, "_enqueue_item", lambda gid, item: queued.append(item.text))
+    monkeypatch.setattr(cog.playback, "enqueue", lambda gid, item: queued.append(item.text))
 
     def message(author_id: int, name: str, content: str) -> discord.Message:
         return cast(discord.Message, SimpleNamespace(
