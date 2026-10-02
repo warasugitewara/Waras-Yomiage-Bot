@@ -3,7 +3,7 @@
 <p>
   <img alt="version" src="https://img.shields.io/badge/version-1.0.0-blue">
   <img alt="python" src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white">
-  <img alt="discord.py" src="https://img.shields.io/badge/discord.py-2.3%2B-5865F2?logo=discord&logoColor=white">
+  <img alt="discord.py" src="https://img.shields.io/badge/discord.py-2.7.1%2B-5865F2?logo=discord&logoColor=white">
   <img alt="voicevox" src="https://img.shields.io/badge/VOICEVOX-ENGINE-orange">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
 </p>
