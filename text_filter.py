@@ -1,6 +1,7 @@
 """メッセージの前処理フィルター"""
 
 import functools
+import os
 import re
 
 
@@ -9,7 +10,6 @@ _URL_RE = re.compile(r"https?://\S+")
 
 # URL サービス分類テーブル（マッチ順に評価）
 _URL_LABELS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"https?://(?:[^/]+\.)*warasugi\.com/",    re.IGNORECASE), "わらすぎのURL"),
     (re.compile(r"https?://(?:www\.)?github\.com/",         re.IGNORECASE), "GitHubリンク"),
     (re.compile(r"https?://(?:www\.)?youtu(?:\.be|be\.com)/", re.IGNORECASE), "YouTubeリンク"),
     (re.compile(r"https?://(?:www\.)?(?:twitter|x)\.com/", re.IGNORECASE), "Twitterリンク"),
@@ -20,6 +20,26 @@ _URL_LABELS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"https?://(?:www\.)?pixiv\.net/",          re.IGNORECASE), "Pixivリンク"),
     (re.compile(r"https?://(?:www\.)?steamcommunity\.com/", re.IGNORECASE), "Steamリンク"),
 ]
+
+
+def _parse_custom_url_labels(raw: str) -> list[tuple[re.Pattern, str]]:
+    """CUSTOM_URL_LABELS（例: "example.com=例のURL,foo.org=フーのURL"）を解析する。
+
+    ドメインはサブドメインも含めて一致させ、組み込みのラベルより優先する。不正な項目は無視する。
+    """
+    labels: list[tuple[re.Pattern, str]] = []
+    for part in raw.split(","):
+        domain, sep, label = part.partition("=")
+        domain, label = domain.strip().lower(), label.strip()
+        if not sep or not domain or not label:
+            continue
+        pattern = re.compile(rf"https?://(?:[^/]+\.)?{re.escape(domain)}(?:[/:?#]|$)", re.IGNORECASE)
+        labels.append((pattern, label))
+    return labels
+
+
+# 運用者ごとの URL ラベル（.env の CUSTOM_URL_LABELS）を組み込みより先に評価する
+_URL_LABELS[:0] = _parse_custom_url_labels(os.getenv("CUSTOM_URL_LABELS", ""))
 
 
 def _classify_url(m: re.Match) -> str:

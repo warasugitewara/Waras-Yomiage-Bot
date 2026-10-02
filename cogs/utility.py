@@ -42,7 +42,7 @@ _HELP_DATA = [
     ("🛠️ ユーティリティ", [
         ("`/ping`", "応答速度を確認"),
         ("`/about`", "ボット情報を表示 (alias: `!status`)"),
-        ("`/help`", "このヘルプを表示 (aliases: `!h`, `!?`)"),
+        ("`/help`", "このヘルプを表示 (aliases: `!h`, `!?`, `!info`)"),
     ]),
 ]
 
@@ -157,7 +157,7 @@ class Utility(commands.Cog):
                 inline=False,
             )
 
-        embed.set_footer(text=f"discord.py {discord.__version__} • {platform.system()} • コンセプト: 簡単・低遅延・直感的・エコ")
+        embed.set_footer(text=f"discord.py {discord.__version__} • {platform.system()} • コンセプト: シンプル・高速・直感的・エコ")
         await ctx.send(embed=embed)
 
     # ── help ──────────────────────────────────────────────────────────────

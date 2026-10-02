@@ -128,7 +128,7 @@ python bot.py
    | General | Unprivileged container | ✅ ON |
    | Template | Template | `debian-13-standard_*.tar.zst` |
    | Disks | Disk size | `10` GB |
-   | CPU | Cores | `2` |
+   | CPU | Cores | `4`（最小 `1`） |
    | Memory | Memory | `2048` MB |
    | Memory | Swap | `512` MB |
    | Network | IPv4 | DHCP または固定IP |
@@ -234,6 +234,7 @@ MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 # BOT_STATUS=online                  # ステータス: online / idle / dnd / invisible（任意）
 # HEALTH_ENABLED=true                # /health コマンドを有効化（デフォルト: 無効）
 # UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&ping=  # Uptime Kuma 死活監視（任意）
+# CUSTOM_URL_LABELS=example.com=例のURL  # 独自ドメインの URL の読み上げ方（カンマ区切りで複数可）（任意）
 ```
 
 <details>
@@ -281,6 +282,9 @@ MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 | 東北きりたん | ノーマル: `108` |
 | 東北イタコ | ノーマル: `109` |
 | あんこもん | ノーマル: `113` / つよつよ: `114` / よわよわ: `115` / けだるげ: `116` / ささやき: `117` |
+| 夜語トバリ | ノーマル: `118` / 明るい: `119` / 哀しみ: `120` / 呆れ: `121` |
+| 暁記ミタマ | ノーマル: `122` / 怒り: `123` / 哀しみ: `124` / ささやき: `125` |
+| 里石ユカ | つぼみ: `126` |
 
 > 💡 全スピーカー・スタイル一覧は `/myvoice list`、またはコンテナ内で `curl http://localhost:50021/speakers` で確認できます（ENGINE は `127.0.0.1` で待ち受けるため外部からは見えません）。
 
@@ -373,7 +377,7 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | コマンド | 説明 |
 |---|---|
 | `!join` / `/join` | 実行者のVCに参加し、現在のテキストchを読み上げ対象に自動追加。接続時に「接続しました」と読み上げ |
-| `!leave` / `/leave` | VCから退出し、全設定をリセット（エイリアス: `!quit`, `!stop`, `!bye`） |
+| `!leave` / `/leave` | VCから退出し、全設定をリセット（エイリアス: `!quit`, `!stop`, `!bye`, `!exit`） |
 | `!skip` / `/skip` | 現在再生中の読み上げをスキップ |
 
 ### ユーティリティ
@@ -565,7 +569,7 @@ UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&pi
 
 | 処理 | 内容 |
 |---|---|
-| URL 分類 | URL → サービス名に置換（例: `GitHubリンク`、`YouTubeリンク`、`URLリンク`） |
+| URL 分類 | URL → サービス名に置換（例: `GitHubリンク`、`YouTubeリンク`、`URLリンク`）。`.env` の `CUSTOM_URL_LABELS` で独自ドメインのラベルを追加可能（例: `example.com=例のURL,foo.org=フーのURL`。サブドメインも対象） |
 | メンション除去 | `@user`・`#channel`・ロールメンションを除去 |
 | カスタム絵文字 | `<:smile:123>` → `smile` に変換 |
 | 読み替え辞書 | サーバーごとの辞書を適用（ASCII 単語は単語境界マッチ） |

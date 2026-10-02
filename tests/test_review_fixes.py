@@ -141,3 +141,65 @@ async def test_guild_remove_deletes_guild_data(tmp_path: Path, monkeypatch: pyte
     assert cog.word_dict.all(2) == {"cat": "ねこ"}
     assert cog.guild_settings.ignored_all(2) == {5}
     await cog.cog_unload()
+
+
+# ---- R-15: kuroneko 形式の regex・null を取り込まない
+
+
+def test_parse_dict_json_skips_regex_and_non_string() -> None:
+    parsed = tts_mod.TTS._parse_dict_json({
+        "kind": "com.kuroneko6423.kuronekottsbot.dictionary",
+        "version": 1,
+        "data": [
+            {"before": "cat", "after": "ねこ", "regex": False},
+            {"before": "c.t", "after": "x", "regex": True},
+            {"before": None, "after": "x"},
+            {"word": "dog", "reading": "いぬ"},
+            "broken",
+        ],
+    })
+    assert parsed == ({"cat": "ねこ", "dog": "いぬ"}, 3)
+    assert tts_mod.TTS._parse_dict_json({"a": "b"}) == ({"a": "b"}, 0)
+    assert tts_mod.TTS._parse_dict_json({"a": 1}) is None
+    assert tts_mod.TTS._parse_dict_json([]) is None
+
+
+def test_custom_url_labels() -> None:
+    import text_filter
+
+    labels = text_filter._parse_custom_url_labels("example.com=例のURL, bad, =x, foo.org=")
+    assert len(labels) == 1
+    pattern, label = labels[0]
+    assert label == "例のURL"
+    assert pattern.match("https://example.com/a")
+    assert pattern.match("https://sub.example.com")
+    assert not pattern.match("https://notexample.com/")
+    assert not pattern.match("https://example.com.evil.net/")
+
+
+# ---- R-8: Bot が外部から切断されたら状態を片付ける
+
+
+async def test_bot_disconnect_resets_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bot import YomiageBot
+
+    bot = SimpleNamespace(user_voice_store=SimpleNamespace(get=lambda _uid: 3), user=SimpleNamespace(id=999))
+    cog = tts_mod.TTS(cast(YomiageBot, bot))
+    reset: list[int] = []
+    monkeypatch.setattr(cog, "_reset_guild_session", reset.append)
+
+    def event(member_id: int, before: object, after: object):
+        member = SimpleNamespace(id=member_id, bot=True, guild=SimpleNamespace(id=1))
+        return (
+            cast(discord.Member, member),
+            cast(discord.VoiceState, SimpleNamespace(channel=before)),
+            cast(discord.VoiceState, SimpleNamespace(channel=after)),
+        )
+
+    vc = SimpleNamespace(id=10)
+    await cog.on_voice_state_update(*event(999, vc, SimpleNamespace(id=11)))  # 移動は対象外
+    await cog.on_voice_state_update(*event(500, vc, None))  # 他の Bot は対象外
+    assert reset == []
+    await cog.on_voice_state_update(*event(999, vc, None))
+    assert reset == [1]
+    await cog.cog_unload()

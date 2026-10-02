@@ -38,6 +38,9 @@ _DICT_MAX_ENTRIES = 5000
 _DICT_WORD_MAX_LEN = 50
 _DICT_READING_MAX_LEN = 100
 
+# /dict list をメッセージで表示する最大件数（超えたら JSON ファイルで返す）
+_DICT_LIST_INLINE_MAX = 50
+
 # 名前読み上げ時の名前の最大文字数（長い表示名で本文が埋もれないように）
 _NAME_MAX_LEN = 20
 
@@ -79,6 +82,16 @@ def _extract_discord_pcm(wav_bytes: bytes) -> bytes | None:
     except (wave.Error, EOFError):
         return None
     return pcm or None
+
+
+def _dict_json_file(guild_id: int, d: dict[str, str]) -> discord.File:
+    """辞書を本Bot形式の JSON ファイルにする（export / 件数の多い list で共用）"""
+    payload = {
+        "version": 1,
+        "data": [{"word": w, "reading": r} for w, r in d.items()],
+    }
+    buf = io.BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode())
+    return discord.File(buf, filename=f"dict_{guild_id}.json")
 
 
 def _require_guild(ctx_or_inter: commands.Context | discord.Interaction) -> discord.Guild:
@@ -319,6 +332,14 @@ class TTS(commands.Cog):
                     except Exception:
                         pass
 
+    def _reset_guild_session(self, guild_id: int):
+        """VC から退出したときの後片付け（読み上げチャンネル・速度・ワーカーをリセット）"""
+        self._cancel_auto_leave(guild_id)
+        self.channel_store.clear(guild_id)
+        self._speed.pop(guild_id, None)
+        self._last_author.pop(guild_id, None)
+        self._cancel_workers(guild_id)
+
     def _cancel_auto_leave(self, guild_id: int):
         """スケジュール済みの自動退出タスクをキャンセルする"""
         task = self._auto_leave_tasks.pop(guild_id, None)
@@ -345,10 +366,7 @@ class TTS(commands.Cog):
         non_bots = [m for m in vc.channel.members if not m.bot]
         if non_bots:
             return
-        self.channel_store.clear(guild_id)
-        self._speed.pop(guild_id, None)
-        self._last_author.pop(guild_id, None)
-        self._cancel_workers(guild_id)
+        self._reset_guild_session(guild_id)
         try:
             await vc.disconnect()
         except Exception as e:
@@ -617,11 +635,7 @@ class TTS(commands.Cog):
 
         await ctx.defer()
         guild_id = guild.id
-        self._cancel_auto_leave(guild_id)
-        self.channel_store.clear(guild_id)
-        self._speed.pop(guild_id, None)
-        self._last_author.pop(guild_id, None)
-        self._cancel_workers(guild_id)
+        self._reset_guild_session(guild_id)
 
         try:
             await vc.disconnect()
@@ -897,11 +911,19 @@ class TTS(commands.Cog):
         guild_id = ctx_or_inter.guild.id
         d = self.word_dict.all(guild_id)
         if not d:
-            msg = "辞書は空です。"
-        else:
-            lines = "\n".join(f"• `{w}` → `{r}`" for w, r in d.items())
-            msg = f"📖 読み替え辞書 ({len(d)}件):\n{lines}"
-        await self._send_chunks(ctx_or_inter, msg)
+            await self._send(ctx_or_inter, "辞書は空です。", ephemeral=True)
+            return
+        # 件数が多いとチャンネルが連投で埋まるため、JSON ファイルにまとめて本人にだけ返す
+        if len(d) > _DICT_LIST_INLINE_MAX:
+            msg = f"📖 読み替え辞書（{len(d)}件）は件数が多いためファイルで送ります。"
+            file = _dict_json_file(guild_id, d)
+            if isinstance(ctx_or_inter, discord.Interaction):
+                await ctx_or_inter.response.send_message(msg, file=file, ephemeral=True)
+            else:
+                await ctx_or_inter.send(msg, file=file)
+            return
+        lines = "\n".join(f"• `{w}` → `{r}`" for w, r in d.items())
+        await self._send_chunks(ctx_or_inter, f"📖 読み替え辞書 ({len(d)}件):\n{lines}", ephemeral=True)
 
     @dict_group.command(name="export")
     async def dict_export_prefix(self, ctx: commands.Context):
@@ -914,13 +936,7 @@ class TTS(commands.Cog):
     async def _dict_export(self, ctx_or_inter):
         guild_id = ctx_or_inter.guild.id
         d = self.word_dict.export_dict(guild_id)
-        payload = {
-            "version": 1,
-            "data": [{"word": w, "reading": r} for w, r in d.items()],
-        }
-        buf = io.BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode())
-        buf.seek(0)
-        file = discord.File(buf, filename=f"dict_{guild_id}.json")
+        file = _dict_json_file(guild_id, d)
         if isinstance(ctx_or_inter, discord.Interaction):
             await ctx_or_inter.response.send_message(
                 f"📤 辞書をエクスポートしました（{len(d)}件）", file=file
@@ -970,10 +986,11 @@ class TTS(commands.Cog):
             await self._send(ctx_or_inter, "⚠️ JSONの読み込みに失敗しました。ファイルが正しいか確認してください。")
             return
 
-        entries = self._parse_dict_json(data)
-        if entries is None:
+        parsed = self._parse_dict_json(data)
+        if parsed is None:
             await self._send(ctx_or_inter, "⚠️ サポートされていないJSONフォーマットです。")
             return
+        entries, skipped = parsed
 
         # 空単語は読み上げに影響しないため黙ってスキップする
         entries = {w: r for w, r in entries.items() if w.strip()}
@@ -987,7 +1004,10 @@ class TTS(commands.Cog):
 
         count = self.word_dict.import_dict(guild_id, entries, replace=replace)
         mode = "全置換" if replace else "マージ"
-        await self._send(ctx_or_inter, f"📥 辞書を{mode}でインポートしました（{count}件）。")
+        msg = f"📥 辞書を{mode}でインポートしました（{count}件）。"
+        if skipped:
+            msg += f"\n⚠️ 正規表現のエントリや値が文字列でないエントリ {skipped}件は取り込みませんでした。"
+        await self._send(ctx_or_inter, msg)
 
     @staticmethod
     def _check_dict_import(entries: dict[str, str], current: dict[str, str]) -> str | None:
@@ -1002,33 +1022,48 @@ class TTS(commands.Cog):
         return None
 
     @staticmethod
-    def _parse_dict_json(data: dict) -> dict[str, str] | None:
-        """各種フォーマットのJSONを {word: reading} 形式に変換する。
+    def _parse_dict_json(data: object) -> tuple[dict[str, str], int] | None:
+        """各種フォーマットのJSONを ({word: reading}, 取り込めなかった件数) に変換する。
 
         対応フォーマット:
         - 本Bot形式: {"version":1, "data":[{"word":"...","reading":"..."},...]}
         - kuroneko形式: {"kind":"...","version":1,"data":[{"before":"...","after":"...","regex":...},...]}
         - シンプル形式: {"word":"reading",...}
+
+        kuroneko形式の regex: true は正規表現として解釈できないため取り込まない
+        （文字列として取り込むと意味が黙って変わる）。値が文字列でないエントリも取り込まない。
         """
         if not isinstance(data, dict):
             return None
 
         if "data" in data and isinstance(data["data"], list):
-            result = {}
+            result: dict[str, str] = {}
+            skipped = 0
             for item in data["data"]:
                 if not isinstance(item, dict):
+                    skipped += 1
                     continue
                 if "before" in item and "after" in item:
                     # kuroneko形式
-                    result[str(item["before"])] = str(item["after"])
+                    word, reading = item["before"], item["after"]
+                    if item.get("regex") is True:
+                        skipped += 1
+                        continue
                 elif "word" in item and "reading" in item:
                     # 本Bot形式
-                    result[str(item["word"])] = str(item["reading"])
-            return result if result else {}
+                    word, reading = item["word"], item["reading"]
+                else:
+                    skipped += 1
+                    continue
+                if not (isinstance(word, str) and isinstance(reading, str)):
+                    skipped += 1
+                    continue
+                result[word] = reading
+            return result, skipped
 
         # シンプルフラット形式 {"word": "reading"}
         if all(isinstance(k, str) and isinstance(v, str) for k, v in data.items()):
-            return data
+            return dict(data), 0
 
         return None
 
@@ -1220,6 +1255,11 @@ class TTS(commands.Cog):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ):
+        if self.bot.user is not None and member.id == self.bot.user.id:
+            # 管理者による切断など、/leave 以外で Bot が VC から外れた場合も状態を片付ける
+            if before.channel is not None and after.channel is None:
+                self._reset_guild_session(member.guild.id)
+            return
         if member.bot:
             return
         guild = member.guild
