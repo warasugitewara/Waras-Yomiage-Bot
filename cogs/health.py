@@ -8,7 +8,6 @@ import time
 
 import discord
 import psutil
-from discord import app_commands
 from discord.ext import commands
 
 from version import VERSION

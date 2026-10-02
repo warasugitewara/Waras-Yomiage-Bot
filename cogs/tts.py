@@ -292,8 +292,10 @@ class TTS(commands.Cog):
     def _cancel_workers(self, guild_id: int):
         """合成タスクと再生タスクをキャンセルしてキューを空にする"""
         synth, play = self._workers.pop(guild_id, (None, None))
-        if synth: synth.cancel()
-        if play: play.cancel()
+        if synth:
+            synth.cancel()
+        if play:
+            play.cancel()
         for q in (self._queues.pop(guild_id, None), self._pcm_queues.pop(guild_id, None)):
             if q:
                 while not q.empty():
@@ -538,14 +540,6 @@ class TTS(commands.Cog):
             return None
         entry = self._speaker_id_map.get(speaker_id)
         return f"VOICEVOX:{entry[0]}" if entry else None
-
-    async def _defer(self, ctx_or_inter, ephemeral: bool = False):
-        """slash/prefix 両対応の defer。prefix では typing を表示するだけ"""
-        if isinstance(ctx_or_inter, discord.Interaction):
-            if not ctx_or_inter.response.is_done():
-                await ctx_or_inter.response.defer(ephemeral=ephemeral)
-        else:
-            await ctx_or_inter.typing()
 
     async def _send(self, ctx_or_inter, msg: str, ephemeral: bool = False):
         await send_response(ctx_or_inter, msg, ephemeral=ephemeral)

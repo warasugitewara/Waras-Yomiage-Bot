@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, cast
 
 import discord
 import pytest
-from discord.ext import commands
 
 import cogs.tts as tts_mod
 from cogs.tts import TTS, TTSItem

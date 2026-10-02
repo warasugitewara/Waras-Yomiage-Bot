@@ -76,7 +76,8 @@ class Utility(commands.Cog):
         max_length = os.getenv("MAX_TEXT_LENGTH", "100")
 
         # ランタイム情報
-        import platform, sys
+        import platform
+        import sys
         guild_count = len(self.bot.guilds)
         user_count = sum(g.member_count or 0 for g in self.bot.guilds)
         ws_ms = round(self.bot.latency * 1000)

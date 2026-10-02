@@ -27,3 +27,6 @@ jobs:
 
       - name: Type check
         run: uvx pyright@1.1.414 .
+
+      - name: Lint
+        run: uvx ruff@0.16.10 check .

@@ -8,7 +8,7 @@ async def kuma_heartbeat():
         print("[KUMA] UPTIME_KUMA_PUSH_URL が未設定のためハートビートを無効化")
         return
 
-    print(f"[KUMA] ハートビート開始")
+    print("[KUMA] ハートビート開始")
     timeout = aiohttp.ClientTimeout(total=10)
     # セッションは使い回す（毎回生成すると接続プールが再利用されない）
     async with aiohttp.ClientSession(timeout=timeout) as session:

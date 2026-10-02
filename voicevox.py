@@ -68,7 +68,7 @@ class VoicevoxClient:
                             continue
                         raise VoicevoxError(f"{path} failed: HTTP {resp.status}")
                     return await resp.read()
-            except asyncio.TimeoutError as e:
+            except TimeoutError as e:
                 last_exc = e
                 if retry_on_timeout and attempt < retries:
                     await asyncio.sleep(self._retry_backoff * (2 ** attempt))
