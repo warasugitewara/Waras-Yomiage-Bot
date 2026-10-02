@@ -1,9 +1,11 @@
-import os
 import asyncio
+
 import aiohttp
 
+from config import get_config
+
 async def kuma_heartbeat():
-    push_url = os.getenv("UPTIME_KUMA_PUSH_URL")
+    push_url = get_config().uptime_kuma_push_url
     if not push_url:
         print("[KUMA] UPTIME_KUMA_PUSH_URL が未設定のためハートビートを無効化")
         return

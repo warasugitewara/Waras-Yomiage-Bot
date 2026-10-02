@@ -1,8 +1,9 @@
 """メッセージの前処理フィルター"""
 
 import functools
-import os
 import re
+
+from config import get_config
 
 
 # URL パターン
@@ -39,7 +40,7 @@ def _parse_custom_url_labels(raw: str) -> list[tuple[re.Pattern, str]]:
 
 
 # 運用者ごとの URL ラベル（.env の CUSTOM_URL_LABELS）を組み込みより先に評価する
-_URL_LABELS[:0] = _parse_custom_url_labels(os.getenv("CUSTOM_URL_LABELS", ""))
+_URL_LABELS[:0] = _parse_custom_url_labels(get_config().custom_url_labels)
 
 
 def _classify_url(m: re.Match) -> str:

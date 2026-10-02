@@ -3,13 +3,14 @@
 ERROR_WEBHOOK_URL が .env に設定されていない場合はすべて無効（何もしない）。
 """
 
-import os
 import time
 import traceback
 from typing import Any
 
 import aiohttp
 import discord
+
+from config import get_config
 
 _COLORS = {
     "error":   0xED4245,  # Discord red
@@ -33,7 +34,7 @@ class WebhookLogger:
 
     def __init__(self):
         # WebhookLogger() は load_dotenv() 呼び出し後に生成すること
-        self.url: str | None = os.getenv("ERROR_WEBHOOK_URL") or None
+        self.url: str | None = get_config().error_webhook_url
         self._session: aiohttp.ClientSession | None = None
         # (level, title) → 最終送信成功 monotonic 時刻
         self._cooldowns: dict[tuple[str, str], float] = {}

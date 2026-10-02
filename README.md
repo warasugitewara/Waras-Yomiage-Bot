@@ -238,6 +238,8 @@ MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 # CUSTOM_URL_LABELS=example.com=例のURL  # 独自ドメインの URL の読み上げ方（カンマ区切りで複数可）（任意）
 ```
 
+> ℹ️ 設定値は起動時にまとめて検証します。範囲外の値（例: `DEFAULT_SPEED=3`）や形式の誤り（例: `OWNER_IDS` に数字以外）があると、原因の変数名を表示して起動を中止します。
+
 <details>
 <summary>主要なスピーカーID例（クリックで展開）</summary>
 

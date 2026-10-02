@@ -5,7 +5,6 @@ import collections
 import io
 import wave
 import json
-import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -14,6 +13,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from channel_store import ChannelStore, WordDict
+from config import get_config
 from discord_helpers import send_group_usage, send_response
 from guild_settings import GuildSettingsStore
 from text_filter import filter_message
@@ -172,14 +172,15 @@ class TTSItem:
 class TTS(commands.Cog):
     def __init__(self, bot: "YomiageBot"):
         self.bot = bot
-        self.voicevox = VoicevoxClient(os.getenv("VOICEVOX_URL", "http://localhost:50021"))
+        config = get_config()
+        self.voicevox = VoicevoxClient(config.voicevox_url)
         self.channel_store = ChannelStore()
         self.word_dict = WordDict()
         self.guild_settings = GuildSettingsStore()
 
-        self.default_speaker = int(os.getenv("DEFAULT_SPEAKER", "3"))
-        self.default_speed = float(os.getenv("DEFAULT_SPEED", "1.0"))
-        self.max_length = int(os.getenv("MAX_TEXT_LENGTH", "100"))
+        self.default_speaker = config.default_speaker
+        self.default_speed = config.default_speed
+        self.max_length = config.max_text_length
 
         # UserVoiceStore は bot 側で管理し、Owner Cog と共有
         self.user_voice = bot.user_voice_store

@@ -1,7 +1,6 @@
 """Waras-Yomiage-Bot — VOICEVOX を使った Discord 読み上げBot"""
 
 import asyncio
-import os
 import sys
 
 import discord
@@ -30,11 +29,12 @@ def _user_error_message(error: Exception) -> str | None:
     return None
 
 # load_dotenv() 後に import することで環境変数を確実に読み込む
+from config import get_config  # noqa: E402
 from webhook_logger import WebhookLogger  # noqa: E402
 from user_store import UserVoiceStore  # noqa: E402
 from cogs.uptime_kuma import kuma_heartbeat  # noqa: E402
 
-PREFIX = os.getenv("PREFIX", "!")
+PREFIX = get_config().prefix
 
 
 class YomiageBot(commands.Bot):
@@ -51,15 +51,12 @@ class YomiageBot(commands.Bot):
         # WebhookLogger は load_dotenv() 後に生成（コンストラクタ内で env を読む）
         self.webhook = WebhookLogger()
 
+        config = get_config()
         # オーナーユーザーID一覧（OWNER_IDS=id1,id2 形式、未設定時は空）
-        raw_owners = os.getenv("OWNER_IDS", "")
-        self.owner_ids = frozenset(
-            int(x.strip()) for x in raw_owners.split(",") if x.strip().isdigit()
-        )
+        self.owner_ids = config.owner_ids
 
         # UserVoiceStore は TTS / Owner 両 Cog で共有（メモリキャッシュを一元管理）
-        default_speaker = int(os.getenv("DEFAULT_SPEAKER", "3"))
-        self.user_voice_store = UserVoiceStore(default_speaker=default_speaker)
+        self.user_voice_store = UserVoiceStore(default_speaker=config.default_speaker)
 
         # バックグラウンドタスクの参照を保持（GC による途中消失を防ぎ、終了時にキャンセルする）
         self._kuma_task: asyncio.Task[None] | None = None
@@ -73,20 +70,20 @@ class YomiageBot(commands.Bot):
             await self.load_extension("cogs.tts")
             await self.load_extension("cogs.utility")
             await self.load_extension("cogs.owner")
-            if os.getenv("HEALTH_ENABLED", "false").lower() == "true":
+            if get_config().health_enabled:
                 await self.load_extension("cogs.health")
         except Exception as e:
             await self.webhook.send("error", "Cog 読み込み失敗", exc=e)
             raise
 
         # GUILD_ID が設定されている場合はギルド限定sync（即時反映）、未設定の場合はグローバルsync
-        guild_id_str = os.getenv("GUILD_ID", "")
+        guild_id = get_config().guild_id
         try:
-            if guild_id_str.isdigit():
-                guild = discord.Object(id=int(guild_id_str))
+            if guild_id is not None:
+                guild = discord.Object(id=guild_id)
                 self.tree.copy_global_to(guild=guild)
                 await self.tree.sync(guild=guild)
-                print(f"[Bot] スラッシュコマンドをギルド {guild_id_str} に同期しました（即時反映）。")
+                print(f"[Bot] スラッシュコマンドをギルド {guild_id} に同期しました（即時反映）。")
             else:
                 await self.tree.sync()
                 print("[Bot] スラッシュコマンドをグローバル同期しました（反映まで最大1時間）。")
@@ -97,7 +94,7 @@ class YomiageBot(commands.Bot):
         self.tree.on_error = self._on_tree_error
 
         # Uptime Kuma ハートビート
-        if os.getenv("UPTIME_KUMA_PUSH_URL"):
+        if get_config().uptime_kuma_push_url:
             self._kuma_task = asyncio.create_task(kuma_heartbeat(), name="kuma-heartbeat")
 
     async def on_ready(self):
@@ -110,8 +107,7 @@ class YomiageBot(commands.Bot):
             "dnd":       discord.Status.dnd,
             "invisible": discord.Status.invisible,
         }
-        raw_status = os.getenv("BOT_STATUS", "online").lower().strip()
-        status = _status_map.get(raw_status, discord.Status.online)
+        status = _status_map[get_config().bot_status]
 
         await self.change_presence(
             status=status,
@@ -132,7 +128,7 @@ class YomiageBot(commands.Bot):
                 "サーバー数": str(len(self.guilds)),
                 "discord.py": discord.__version__,
                 "プレフィックス": PREFIX,
-                "ステータス": raw_status,
+                "ステータス": get_config().bot_status,
             },
         )
 
@@ -224,7 +220,7 @@ class YomiageBot(commands.Bot):
 
 
 async def main():
-    token = os.getenv("DISCORD_TOKEN")
+    token = get_config().discord_token
     if not token:
         raise ValueError(".env に DISCORD_TOKEN が設定されていません。")
 

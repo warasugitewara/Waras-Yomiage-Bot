@@ -1,7 +1,6 @@
 """health Cog — システム状態確認コマンド（HEALTH_ENABLED=true のときのみロード）"""
 
 import asyncio
-import os
 import platform
 import sys
 import time
@@ -10,6 +9,7 @@ import discord
 import psutil
 from discord.ext import commands
 
+from config import get_config
 from version import VERSION
 
 
@@ -84,7 +84,7 @@ class Health(commands.Cog):
         voicevox_status = await _probe_voicevox(self.bot)
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
-        prefix = os.getenv("PREFIX", "!")
+        prefix = get_config().prefix
         server_count = len(self.bot.guilds)
         user_count   = sum(g.member_count or 0 for g in self.bot.guilds)
         ws_ping_ms   = round(self.bot.latency * 1000)

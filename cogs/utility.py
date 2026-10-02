@@ -1,12 +1,12 @@
 """utility Cog — ping / about / help"""
 
-import os
 import time
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from config import get_config
 from version import VERSION
 
 _REPO_URL = "https://github.com/warasugitewara/Waras-Yomiage-Bot"
@@ -70,10 +70,11 @@ class Utility(commands.Cog):
     @commands.hybrid_command(name="about", aliases=["status"], description="ボット情報を表示します")
     async def about(self, ctx: commands.Context):
         await ctx.defer()
-        prefix = os.getenv("PREFIX", "!")
-        default_speaker = os.getenv("DEFAULT_SPEAKER", "3")
-        default_speed = os.getenv("DEFAULT_SPEED", "1.0")
-        max_length = os.getenv("MAX_TEXT_LENGTH", "100")
+        config = get_config()
+        prefix = config.prefix
+        default_speaker = config.default_speaker
+        default_speed = config.default_speed
+        max_length = config.max_text_length
 
         # ランタイム情報
         import platform
@@ -187,7 +188,7 @@ class Utility(commands.Cog):
 
         embed = discord.Embed(
             title="📖 コマンド一覧",
-            description=f"スラッシュ `/` またはプレフィックス `{os.getenv('PREFIX', '!')}` で使えます。",
+            description=f"スラッシュ `/` またはプレフィックス `{get_config().prefix}` で使えます。",
             color=discord.Color.blurple(),
         )
         
