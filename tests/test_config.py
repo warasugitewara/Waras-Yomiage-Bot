@@ -51,3 +51,15 @@ def test_values_are_parsed() -> None:
 def test_invalid_values_name_the_variable(name: str, value: str) -> None:
     with pytest.raises(ConfigError, match=name):
         load_config({name: value})
+
+
+def test_allowed_speakers() -> None:
+    assert load_config({}).allowed_speakers is None
+    c = load_config({"ALLOWED_SPEAKERS": "3, 46,", "DEFAULT_SPEAKER": "46"})
+    assert c.allowed_speakers == frozenset({3, 46})
+    assert c.is_speaker_allowed(3) and not c.is_speaker_allowed(29)
+    assert load_config({}).is_speaker_allowed(29)
+    with pytest.raises(ConfigError, match="ALLOWED_SPEAKERS"):
+        load_config({"ALLOWED_SPEAKERS": "3,abc"})
+    with pytest.raises(ConfigError, match="DEFAULT_SPEAKER"):
+        load_config({"ALLOWED_SPEAKERS": "46"})  # デフォルトの 3 が含まれない

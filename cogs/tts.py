@@ -178,6 +178,7 @@ class TTS(commands.Cog):
         self.word_dict = WordDict()
         self.guild_settings = GuildSettingsStore()
 
+        self._config = config
         self.default_speaker = config.default_speaker
         self.default_speed = config.default_speed
         self.max_length = config.max_text_length
@@ -558,7 +559,7 @@ class TTS(commands.Cog):
         """有効な speaker_id セットを返す（キャッシュ利用）。失敗時は None"""
         if not await self._ensure_speakers_cache() or self._speaker_id_map is None:
             return None
-        return set(self._speaker_id_map.keys())
+        return {sid for sid in self._speaker_id_map if self._config.is_speaker_allowed(sid)}
 
     async def _resolve_speaker_name(self, speaker_id: int) -> str | None:
         """speaker_id から「キャラ名 / スタイル名」の文字列を返す（キャッシュ利用）"""
@@ -566,6 +567,23 @@ class TTS(commands.Cog):
             return None
         entry = self._speaker_id_map.get(speaker_id)
         return f"{entry[0]} / {entry[1]}" if entry else None
+
+    def _effective_speaker(self, user_id: int) -> int:
+        """ユーザーのボイス設定を返す。運用者が ALLOWED_SPEAKERS で外した ID ならデフォルトに戻す"""
+        speaker_id = self.user_voice.get(user_id)
+        return speaker_id if self._config.is_speaker_allowed(speaker_id) else self.default_speaker
+
+    async def credits_in_use(self) -> list[str] | None:
+        """デフォルトと、ユーザーが設定中のボイスのクレジット表記一覧（/about 用）。ENGINE に接続できなければ None"""
+        if not await self._ensure_speakers_cache() or self._speaker_id_map is None:
+            return None
+        speaker_ids = {self.default_speaker, *self.user_voice.export_all().values()}
+        characters = {
+            self._speaker_id_map[sid][0]
+            for sid in speaker_ids
+            if sid in self._speaker_id_map and self._config.is_speaker_allowed(sid)
+        }
+        return sorted(credit_for(c) for c in characters)
 
     async def _resolve_credit(self, speaker_id: int) -> str | None:
         """speaker_id から VOICEVOX のクレジット表記（例: VOICEVOX:ずんだもん）を返す"""
@@ -776,7 +794,11 @@ class TTS(commands.Cog):
 
         lines = ["🎤 **利用可能なスピーカー一覧**\n"]
         for sp in self._speakers_cache or []:
-            styles = " | ".join(f"{s['name']}: `{s['id']}`" for s in sp["styles"])
+            if not any(self._config.is_speaker_allowed(s["id"]) for s in sp["styles"]):
+                continue
+            styles = " | ".join(
+                f"{s['name']}: `{s['id']}`" for s in sp["styles"] if self._config.is_speaker_allowed(s["id"])
+            )
             lines.append(f"**{sp['name']}**\n　{styles}")
 
         await self._send_chunks(ctx_or_inter, "\n".join(lines), ephemeral=True)
@@ -1366,7 +1388,7 @@ class TTS(commands.Cog):
         # enqueue時点でスピーカーと速度を解決（後から変更しても影響しない）
         item = TTSItem(
             text=text,
-            speaker_id=self.user_voice.get(message.author.id),
+            speaker_id=self._effective_speaker(message.author.id),
             speed=self._guild_speed(message.guild.id),
         )
         self._enqueue_item(message.guild.id, item)

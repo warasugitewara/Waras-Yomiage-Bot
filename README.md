@@ -236,6 +236,7 @@ MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 # HEALTH_ENABLED=true                # /health コマンドを有効化（デフォルト: 無効）
 # UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&ping=  # Uptime Kuma 死活監視（任意）
 # CUSTOM_URL_LABELS=example.com=例のURL  # 独自ドメインの URL の読み上げ方（カンマ区切りで複数可）（任意）
+# ALLOWED_SPEAKERS=3,46,89            # 使用を許可するスピーカーID（カンマ区切り。未設定なら全員）（任意）
 ```
 
 > ℹ️ 設定値は起動時にまとめて検証します。範囲外の値（例: `DEFAULT_SPEED=3`）や形式の誤り（例: `OWNER_IDS` に数字以外）があると、原因の変数名を表示して起動を中止します。
@@ -622,6 +623,8 @@ unit ファイルの定義は、[Proxmox LXC 環境構築](#proxmox-setup) の�
 - Bot を運用・利用する際は [VOICEVOX 利用規約](https://voicevox.hiroshiba.jp/term/) に加え、**使用する各キャラクター（音声ライブラリ）の利用規約** に従ってください。規約はキャラクターごとに異なります（各キャラクターの規約は [VOICEVOX 公式サイト](https://voicevox.hiroshiba.jp/) の各キャラクターページから確認できます）。
 - 例: ずんだもん・四国めたん等は [東北ずん子・ずんだもんプロジェクト 音源利用規約](https://zunko.jp/con_ongen_kiyaku.html) が適用され、政治・宗教活動、虚偽情報の拡散目的などでの利用が禁止されています。
 - 読み上げ内容はユーザーが投稿したテキストに依存します。Bot を導入するサーバーの管理者は、利用者にも上記規約の遵守を求めてください。
+- **VC で聞いている人へのクレジット表示:** `/about` に、このBotで利用中のボイス（デフォルトと各ユーザーの設定）のクレジットを一覧表示します。あわせて、Bot の Discord プロフィール（Developer Portal → General Information の Description、または About Me）に「音声: VOICEVOX（各キャラクター）／クレジットは /about」と記載しておくことを推奨します。
+- **法人・商用で運用する場合:** キャラクターによっては非商用限定（No.7・ユーレイちゃん）、企業が関わる利用は事前確認が必要（青山龍星・後鬼・もち子さん）、法人利用・商用利用は個別問い合わせ（Voidoll・ぞん子）などの条件があります。運用形態に合わせて各キャラクターの規約を確認し、`.env` の `ALLOWED_SPEAKERS` で使えるスピーカーを絞ってください。許可外の ID を設定済みのユーザーは、デフォルトのボイスで読み上げます。
 - 本リポジトリは VOICEVOX ENGINE を同梱・再配布しません。ENGINE は [公式リリース](https://github.com/VOICEVOX/voicevox_engine/releases) から各自で取得してください。
 
 ---

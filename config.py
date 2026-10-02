@@ -34,6 +34,11 @@ class Config:
     error_webhook_url: str | None = field(default=None, repr=False)
     uptime_kuma_push_url: str | None = field(default=None, repr=False)
     custom_url_labels: str = ""
+    # 使用を許可するスピーカーID（None は制限なし）
+    allowed_speakers: frozenset[int] | None = None
+
+    def is_speaker_allowed(self, speaker_id: int) -> bool:
+        return self.allowed_speakers is None or speaker_id in self.allowed_speakers
 
 
 def _get(env: Mapping[str, str], name: str) -> str | None:
@@ -93,6 +98,21 @@ def _owner_ids(env: Mapping[str, str]) -> frozenset[int]:
     return frozenset(ids)
 
 
+def _allowed_speakers(env: Mapping[str, str]) -> frozenset[int] | None:
+    raw = _get(env, "ALLOWED_SPEAKERS")
+    if raw is None:
+        return None
+    ids: set[int] = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit():
+            raise ConfigError(f"ALLOWED_SPEAKERS はスピーカーIDをカンマ区切りで指定してください（不正な値: {part!r}）")
+        ids.add(int(part))
+    return frozenset(ids) if ids else None
+
+
 def _guild_id(env: Mapping[str, str]) -> int | None:
     raw = _get(env, "GUILD_ID")
     if raw is None:
@@ -112,11 +132,17 @@ def _bot_status(env: Mapping[str, str]) -> str:
 def load_config(env: Mapping[str, str] | None = None) -> Config:
     """環境変数から設定を読み込んで検証する。不正な値があれば ConfigError"""
     env = os.environ if env is None else env
+    allowed_speakers = _allowed_speakers(env)
+    default_speaker = _int(env, "DEFAULT_SPEAKER", 3, minimum=0)
+    if allowed_speakers is not None and default_speaker not in allowed_speakers:
+        raise ConfigError(
+            f"DEFAULT_SPEAKER（{default_speaker}）が ALLOWED_SPEAKERS に含まれていません"
+        )
     return Config(
         discord_token=_get(env, "DISCORD_TOKEN"),
         prefix=_get(env, "PREFIX") or "!",
         voicevox_url=_get(env, "VOICEVOX_URL") or "http://localhost:50021",
-        default_speaker=_int(env, "DEFAULT_SPEAKER", 3, minimum=0),
+        default_speaker=default_speaker,
         default_speed=_float(env, "DEFAULT_SPEED", 1.0, minimum=0.5, maximum=2.0),
         max_text_length=_int(env, "MAX_TEXT_LENGTH", 100, minimum=1, maximum=2000),
         guild_id=_guild_id(env),
@@ -126,6 +152,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         error_webhook_url=_get(env, "ERROR_WEBHOOK_URL"),
         uptime_kuma_push_url=_get(env, "UPTIME_KUMA_PUSH_URL"),
         custom_url_labels=_get(env, "CUSTOM_URL_LABELS") or "",
+        allowed_speakers=allowed_speakers,
     )
 
 

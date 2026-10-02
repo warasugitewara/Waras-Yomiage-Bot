@@ -6,11 +6,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs.tts import TTS
 from config import get_config
 from version import VERSION
 
 _REPO_URL = "https://github.com/warasugitewara/Waras-Yomiage-Bot"
 _VOICEVOX_TERM_URL = "https://voicevox.hiroshiba.jp/term/"
+
+# /about に一覧表示するクレジットの最大件数（Embed フィールドの 1024 文字制限のため）
+_ABOUT_CREDITS_MAX = 20
 
 # カテゴリーごとのコマンド一覧
 _HELP_DATA = [
@@ -124,13 +128,19 @@ class Utility(commands.Cog):
             inline=False,
         )
 
+        # 利用中のボイス（デフォルト＋ユーザー設定）のクレジットを一覧で示す。ENGINE 未接続時は従来の表記
+        tts = self.bot.get_cog("TTS")
+        credits = await tts.credits_in_use() if isinstance(tts, TTS) else None
+        credit_text = "\n".join(f"`{c}`" for c in credits[:_ABOUT_CREDITS_MAX]) if credits else "VOICEVOX:ずんだもん ほか各キャラクター"
+        if credits and len(credits) > _ABOUT_CREDITS_MAX:
+            credit_text += f"\nほか {len(credits) - _ABOUT_CREDITS_MAX} キャラクター"
         embed.add_field(
-            name="📜 音声クレジット",
+            name="📜 音声クレジット（このBotで利用中のボイス）",
             value=(
-                "VOICEVOX:ずんだもん ほか各キャラクター\n"
-                "（使用中のボイスは `/myvoice info` で確認）\n"
+                f"{credit_text}\n"
+                "（自分のボイスは `/myvoice info` で確認）\n"
                 f"[VOICEVOX 利用規約]({_VOICEVOX_TERM_URL})・各キャラクターの利用規約に従ってご利用ください"
-            ),
+            )[:1024],
             inline=False,
         )
 
@@ -196,7 +206,7 @@ class Utility(commands.Cog):
             val = "\n".join(f"**{name}** : {desc}" for name, desc in cmds)
             embed.add_field(name=category, value=val, inline=False)
 
-        embed.set_footer(text="/help <コマンド名> で詳細表示")
+        embed.set_footer(text="/help <コマンド名> で詳細表示 • 音声は VOICEVOX と各キャラクターの利用規約に従ってご利用ください（クレジットは /about）")
         await ctx.send(embed=embed, ephemeral=True)
 
 

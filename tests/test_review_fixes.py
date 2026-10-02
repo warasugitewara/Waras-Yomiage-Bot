@@ -203,3 +203,35 @@ async def test_bot_disconnect_resets_session(monkeypatch: pytest.MonkeyPatch) ->
     await cog.on_voice_state_update(*event(999, vc, None))
     assert reset == [1]
     await cog.cog_unload()
+
+
+# ---- L-2 / L-3: 利用中のクレジット一覧と ALLOWED_SPEAKERS
+
+
+async def test_credits_in_use_and_allowed_speakers(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bot import YomiageBot
+    from config import load_config
+
+    voices = {"1": 20, "2": 29, "3": 3}
+    bot = SimpleNamespace(
+        user_voice_store=SimpleNamespace(
+            get=lambda uid: voices.get(str(uid), 3),
+            export_all=lambda: dict(voices),
+        )
+    )
+    cog = tts_mod.TTS(cast(YomiageBot, bot))
+    cog._config = load_config({"ALLOWED_SPEAKERS": "3,20"})
+    cog._speakers_cache = [
+        {"name": "ずんだもん", "styles": [{"id": 3, "name": "ノーマル"}]},
+        {"name": "もち子さん", "styles": [{"id": 20, "name": "ノーマル"}]},
+        {"name": "No.7", "styles": [{"id": 29, "name": "ノーマル"}]},
+    ]
+    cog._speaker_id_map = {3: ("ずんだもん", "ノーマル"), 20: ("もち子さん", "ノーマル"), 29: ("No.7", "ノーマル")}
+
+    # 許可されていない No.7 はクレジットにも選択肢にも出ない
+    assert await cog.credits_in_use() == ["VOICEVOX:ずんだもん", "VOICEVOX:もち子(cv 明日葉よもぎ)"]
+    assert await cog._get_valid_speaker_ids() == {3, 20}
+    # 許可外の ID を設定済みのユーザーはデフォルトで読み上げる
+    assert cog._effective_speaker(2) == cog.default_speaker
+    assert cog._effective_speaker(1) == 20
+    await cog.cog_unload()
