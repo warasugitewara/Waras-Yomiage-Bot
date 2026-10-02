@@ -55,6 +55,7 @@ VOICEVOX を使った **ローカル完結型** の Discord 読み上げ (TTS) B
 | ツール | バージョン |
 |---|---|
 | Python | 3.11 以上 |
+| [uv](https://docs.astral.sh/uv/)（推奨） | 最新版。pip でもセットアップ可能 |
 | FFmpeg | 最新安定版 |
 | VOICEVOX ENGINE | 最新版 |
 
@@ -79,17 +80,17 @@ VOICEVOX ENGINE が既に手元で動く環境（ローカル PC など）向け
 ```bash
 git clone https://github.com/warasugitewara/Waras-Yomiage-Bot.git
 cd Waras-Yomiage-Bot
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+uv sync --locked --no-dev   # .venv を作り、uv.lock どおりのバージョンを入れる
 cp .env.example .env
 # .env を編集して DISCORD_TOKEN を設定
 ```
 
+> 💡 uv を使わない場合は `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt` でも同じバージョンが入ります。`requirements.txt` は `uv.lock` から生成しているため、直接編集しないでください（依存を変えるときは `pyproject.toml` を編集して `uv lock` → `uv export --no-dev --no-hashes --no-emit-project -o requirements.txt`）。
+
 ### 3. Bot を起動
 
 ```bash
-source .venv/bin/activate
-python bot.py
+uv run --no-dev bot.py   # または .venv/bin/python bot.py
 ```
 
 ---
