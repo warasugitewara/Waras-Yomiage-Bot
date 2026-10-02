@@ -657,9 +657,11 @@ systemctl enable --now voicevox yomiage-bot
 | 自動参加・除外ユーザー・名前読み上げ | `data/guild_settings.json` | サーバーID → VC・チャンネルID、除外ユーザーID、名前読み上げの ON/OFF | `/autojoin remove`・`/ignore remove`・`/ignore me`・`/readname false` |
 
 - **メッセージ本文はディスクに保存しません。** 合成済み音声はメモリ上に一時キャッシュされ（最大100件・64MB）、Bot の再起動で消去されます。
-- `ERROR_WEBHOOK_URL` を設定した場合、エラー通知にサーバー名・ユーザー名・コマンド名が含まれ、指定した Webhook に送信されます。
-- 各 `data/*.json` には直近3世代のバックアップ（`.bak1`〜`.bak3`）が作成されます。
+- **保持期間:** サーバーごとのデータ（`channels.json`・`dict.json`・`guild_settings.json`）は、Bot がそのサーバーから退出・キックされた時点で削除されます。ボイス設定（`users.json`）は全サーバー共通のため、本人が `/myvoice reset` するまで保持されます。
+- `ERROR_WEBHOOK_URL` を設定した場合、エラー通知にサーバー名・ユーザー名・コマンド名・サーバーID・チャンネルID・エラーのトレースバックが含まれ、指定した Webhook に送信されます。
+- 各 `data/*.json` には直近3世代のバックアップ（`.bak1`〜`.bak3`）が作成されます。削除後も、バックアップは次の保存で順に上書きされるまで残ります。
 - 保存データは Bot を運用するホスト内にのみ保持され、第三者へ提供しません。
+- **VOICEVOX ENGINE の場所:** 読み上げるテキストは `VOICEVOX_URL` の ENGINE に送信されます。ENGINE を別のホストで動かす場合は、そのホストにもメッセージ本文が届きます。`http://` で接続するのは同じホストか信頼できるプライベートネットワーク内に限り、それ以外では `https://`（リバースプロキシ等）を使用してください。
 
 ---
 

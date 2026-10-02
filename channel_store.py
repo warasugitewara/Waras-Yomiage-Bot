@@ -138,5 +138,10 @@ class WordDict:
         self._save()
         return len(entries)
 
+    def clear(self, guild_id: int) -> None:
+        """ギルドの辞書を削除する（サーバーから退出したとき）"""
+        if self._data.pop(guild_id, None) is not None:
+            self._save()
+
     def export_dict(self, guild_id: int) -> dict[str, str]:
         return dict(self._data.get(guild_id, {}))

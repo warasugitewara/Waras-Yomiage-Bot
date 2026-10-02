@@ -106,3 +106,38 @@ def test_credit_overrides() -> None:
     assert tts_mod.credit_for("ずんだもん") == "VOICEVOX:ずんだもん"
     assert tts_mod.credit_for("もち子さん") == "VOICEVOX:もち子(cv 明日葉よもぎ)"
     assert tts_mod.credit_for("里石ユカ") == "VOICEVOX:里石ユカ（つぼみ）"
+
+
+# ---- L-4: サーバーから退出したらデータを削除する
+
+
+async def test_guild_remove_deletes_guild_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import channel_store
+    from guild_settings import GuildSettingsStore
+
+    monkeypatch.setattr(channel_store, "_CHANNELS_FILE", tmp_path / "channels.json")
+    monkeypatch.setattr(channel_store, "_DICT_FILE", tmp_path / "dict.json")
+    bot = SimpleNamespace(user_voice_store=SimpleNamespace(get=lambda _uid: 3))
+    from bot import YomiageBot
+
+    cog = tts_mod.TTS(cast(YomiageBot, bot))
+    cog.channel_store = channel_store.ChannelStore()
+    cog.word_dict = channel_store.WordDict()
+    cog.guild_settings = GuildSettingsStore(tmp_path / "gs.json")
+    for gid in (1, 2):
+        cog.channel_store.add(gid, 10)
+        cog.word_dict.add(gid, "cat", "ねこ")
+        cog.guild_settings.set_autojoin(gid, 20, 10)
+        cog.guild_settings.add_ignored(gid, 5)
+
+    await cog.on_guild_remove(cast(discord.Guild, SimpleNamespace(id=1)))
+
+    assert cog.channel_store.get(1) == set()
+    assert cog.word_dict.all(1) == {}
+    assert cog.guild_settings.autojoin_all(1) == {}
+    assert cog.guild_settings.ignored_all(1) == set()
+    # 他のサーバーのデータは残る
+    assert cog.channel_store.get(2) == {10}
+    assert cog.word_dict.all(2) == {"cat": "ねこ"}
+    assert cog.guild_settings.ignored_all(2) == {5}
+    await cog.cog_unload()

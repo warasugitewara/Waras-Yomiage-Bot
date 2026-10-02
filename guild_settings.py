@@ -83,6 +83,11 @@ class GuildSettingsStore:
         if s is not None and s.is_empty():
             del self._data[guild_id]
 
+    def clear(self, guild_id: int) -> None:
+        """ギルドの設定をすべて削除する（サーバーから退出したとき）"""
+        if self._data.pop(guild_id, None) is not None:
+            self._save()
+
     # ---- 自動参加 ----
 
     def set_autojoin(self, guild_id: int, vc_id: int, text_id: int) -> None:

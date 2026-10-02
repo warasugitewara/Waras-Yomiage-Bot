@@ -1271,6 +1271,20 @@ class TTS(commands.Cog):
         self.channel_store.add(guild.id, text_id)
         self._enqueue_announce(guild.id, "接続しました")
 
+    @commands.Cog.listener()
+    async def on_guild_remove(self, guild: discord.Guild):
+        """サーバーから退出・キックされたら、そのサーバーのデータを削除する"""
+        guild_id = guild.id
+        self._cancel_auto_leave(guild_id)
+        self._cancel_workers(guild_id)
+        self._speed.pop(guild_id, None)
+        self._last_author.pop(guild_id, None)
+        self._autojoin_locks.pop(guild_id, None)
+        self.channel_store.clear(guild_id)
+        self.word_dict.clear(guild_id)
+        self.guild_settings.clear(guild_id)
+        print(f"[GUILD REMOVE] サーバー {guild_id} のデータを削除しました")
+
     # ------------------------------------------------------------------ #
     # Message event
     # ------------------------------------------------------------------ #
