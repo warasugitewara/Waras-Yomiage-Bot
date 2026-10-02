@@ -211,6 +211,12 @@ pip install -r requirements.txt
 # 設定ファイルを作成
 cp .env.example .env
 nano .env
+
+# 専用ユーザーを作成し、書き込みが必要な data/ と .env だけを渡す（root で実行しない）
+useradd --system --create-home --home-dir /var/lib/yomiage --shell /usr/sbin/nologin yomiage
+mkdir -p data
+chown -R yomiage:yomiage data
+chown yomiage:yomiage .env && chmod 600 .env
 ```
 
 #### 5. `.env` の設定
@@ -276,7 +282,7 @@ MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 | 東北イタコ | ノーマル: `109` |
 | あんこもん | ノーマル: `113` / つよつよ: `114` / よわよわ: `115` / けだるげ: `116` / ささやき: `117` |
 
-> 💡 全スピーカー・スタイル一覧は `/myvoice list` または `http://<コンテナIP>:50021/speakers` で確認できます。
+> 💡 全スピーカー・スタイル一覧は `/myvoice list`、またはコンテナ内で `curl http://localhost:50021/speakers` で確認できます（ENGINE は `127.0.0.1` で待ち受けるため外部からは見えません）。
 
 </details>
 
@@ -291,10 +297,16 @@ After=network.target
 
 [Service]
 Type=simple
+User=yomiage
+Group=yomiage
 WorkingDirectory=/opt/voicevox_engine/linux-cpu-x64
 ExecStart=/opt/voicevox_engine/linux-cpu-x64/run --host 127.0.0.1 --port 50021
 Restart=on-failure
 RestartSec=5
+# ENGINE はユーザー辞書などをホーム（/var/lib/yomiage）に書き込むため ProtectSystem=full にとどめる
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
 
 [Install]
 WantedBy=multi-user.target
@@ -309,10 +321,18 @@ Requires=voicevox.service
 
 [Service]
 Type=simple
+User=yomiage
+Group=yomiage
 WorkingDirectory=/opt/Waras-Yomiage-Bot
 ExecStart=/opt/Waras-Yomiage-Bot/.venv/bin/python bot.py
 Restart=on-failure
 RestartSec=10
+# 書き込みは data/ のみ許可する
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/Waras-Yomiage-Bot/data
 
 [Install]
 WantedBy=multi-user.target
@@ -562,55 +582,11 @@ UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&pi
 
 ## systemd 設定（自動起動）
 
-<details>
-<summary>クリックして展開（VOICEVOX ENGINE / Bot の systemd unit 定義）</summary>
+unit ファイルの定義は、[Proxmox LXC 環境構築](#proxmox-setup) の「6. systemd サービスの登録」にまとめています。Proxmox 以外の Debian / Ubuntu でも同じ内容で動作します。
 
-### VOICEVOX ENGINE
-
-`/etc/systemd/system/voicevox.service`
-
-```ini
-[Unit]
-Description=VOICEVOX ENGINE
-After=network.target
-
-[Service]
-Type=simple
-User=your_user
-WorkingDirectory=/opt/voicevox_engine
-ExecStart=/opt/voicevox_engine/voicevox_engine --host 127.0.0.1 --port 50021
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Yomiage Bot
-
-`/etc/systemd/system/yomiage-bot.service`
-
-```ini
-[Unit]
-Description=Waras Yomiage Bot
-After=voicevox.service
-Requires=voicevox.service
-
-[Service]
-Type=simple
-User=your_user
-WorkingDirectory=/opt/Waras-Yomiage-Bot
-ExecStart=/usr/bin/python3 /opt/Waras-Yomiage-Bot/bot.py
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-systemctl enable --now voicevox yomiage-bot
-```
-
-</details>
+- Bot・ENGINE とも専用ユーザー `yomiage` で実行し、root では実行しません（作成手順は「4. Bot のセットアップ」）。
+- Bot は venv の Python（`.venv/bin/python`）で起動します。システムの `python3` では依存ライブラリが見つからず起動しません。
+- ENGINE を Docker や別ホストで動かす場合は、`voicevox.service` を作らず、`yomiage-bot.service` の `After=` / `Requires=` を外して `.env` の `VOICEVOX_URL` を変更してください。
 
 ---
 
