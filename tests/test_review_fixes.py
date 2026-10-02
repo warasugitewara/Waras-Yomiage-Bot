@@ -97,3 +97,12 @@ def test_bot_disables_all_mentions() -> None:
     am = YomiageBot().allowed_mentions
     assert am is not None
     assert not (am.everyone or am.roles or am.users or am.replied_user)
+
+
+# ---- L-1: キャラクター別のクレジット表記
+
+
+def test_credit_overrides() -> None:
+    assert tts_mod.credit_for("ずんだもん") == "VOICEVOX:ずんだもん"
+    assert tts_mod.credit_for("もち子さん") == "VOICEVOX:もち子(cv 明日葉よもぎ)"
+    assert tts_mod.credit_for("里石ユカ") == "VOICEVOX:里石ユカ（つぼみ）"

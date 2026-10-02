@@ -41,6 +41,20 @@ _DICT_READING_MAX_LEN = 100
 # 名前読み上げ時の名前の最大文字数（長い表示名で本文が埋もれないように）
 _NAME_MAX_LEN = 20
 
+# キャラクター名だけでは足りない、規約で指定されたクレジット表記
+# 出典: https://github.com/VOICEVOX/voicevox_blog/tree/main/src/assets/library-term-intro-markdowns （2026-10-02 確認）
+_CREDIT_OVERRIDES = {
+    "もち子さん": "VOICEVOX:もち子(cv 明日葉よもぎ)",
+    "Voidoll": "VOICEVOX:Voidoll(CV:丹下桜)",
+    "ユーレイちゃん": "VOICEVOX:ユーレイちゃん(CV:神崎零)",
+    "里石ユカ": "VOICEVOX:里石ユカ（つぼみ）",
+}
+
+
+def credit_for(character: str) -> str:
+    """キャラクター名から VOICEVOX のクレジット表記を返す"""
+    return _CREDIT_OVERRIDES.get(character, f"VOICEVOX:{character}")
+
 
 def _validate_dict_entry(word: str, reading: str) -> str | None:
     """辞書エントリを検証し、不正ならエラーメッセージを返す"""
@@ -539,7 +553,7 @@ class TTS(commands.Cog):
         if not await self._ensure_speakers_cache() or self._speaker_id_map is None:
             return None
         entry = self._speaker_id_map.get(speaker_id)
-        return f"VOICEVOX:{entry[0]}" if entry else None
+        return credit_for(entry[0]) if entry else None
 
     async def _send(self, ctx_or_inter, msg: str, ephemeral: bool = False):
         await send_response(ctx_or_inter, msg, ephemeral=ephemeral)

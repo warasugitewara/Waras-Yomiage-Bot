@@ -634,6 +634,7 @@ systemctl enable --now voicevox yomiage-bot
 **音声クレジット:** `VOICEVOX:ずんだもん`（デフォルトボイス）
 
 ユーザーが `/myvoice set` で別のキャラクターを選択した場合、そのキャラクターの音声が使用されます（例: `VOICEVOX:四国めたん`）。
+もち子さん・Voidoll・ユーレイちゃん・里石ユカは規約で指定された表記（例: `VOICEVOX:もち子(cv 明日葉よもぎ)`）を `/myvoice set`・`/myvoice info` で表示します。
 
 - Bot を運用・利用する際は [VOICEVOX 利用規約](https://voicevox.hiroshiba.jp/term/) に加え、**使用する各キャラクター（音声ライブラリ）の利用規約** に従ってください。規約はキャラクターごとに異なります（各キャラクターの規約は [VOICEVOX 公式サイト](https://voicevox.hiroshiba.jp/) の各キャラクターページから確認できます）。
 - 例: ずんだもん・四国めたん等は [東北ずん子・ずんだもんプロジェクト 音源利用規約](https://zunko.jp/con_ongen_kiyaku.html) が適用され、政治・宗教活動、虚偽情報の拡散目的などでの利用が禁止されています。
