@@ -8,12 +8,19 @@ _DATA_DIR = Path(__file__).parent / "data"
 _USERS_FILE = _DATA_DIR / "users.json"
 
 
+def is_valid_entry(user_id: object, speaker_id: object) -> bool:
+    """user_id は数字文字列、speaker_id は int（bool は int のサブクラスなので除外）"""
+    return (
+        isinstance(user_id, str)
+        and user_id.isdigit()
+        and isinstance(speaker_id, int)
+        and not isinstance(speaker_id, bool)
+    )
+
+
 def _validate_users(raw: object) -> dict[str, int] | None:
     """{user_id(str): speaker_id(int)} のみ受け入れる"""
-    if isinstance(raw, dict) and all(
-        isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool)
-        for k, v in raw.items()
-    ):
+    if isinstance(raw, dict) and all(is_valid_entry(k, v) for k, v in raw.items()):
         return raw
     return None
 

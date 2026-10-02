@@ -9,6 +9,10 @@ from discord import app_commands
 from discord.ext import commands
 
 from discord_helpers import send_response
+from user_store import is_valid_entry
+
+# インポートファイルの上限（辞書インポートと同じ 1MB）
+_IMPORT_MAX_BYTES = 1024 * 1024
 
 if TYPE_CHECKING:
     from bot import YomiageBot
@@ -115,6 +119,12 @@ class Owner(commands.Cog):
         if not attachment.filename.endswith(".json"):
             await self._send(ctx_or_inter, "⚠️ `.json` ファイルのみ対応しています。")
             return
+        if attachment.size > _IMPORT_MAX_BYTES:
+            await self._send(
+                ctx_or_inter,
+                f"⚠️ ファイルサイズが上限（{_IMPORT_MAX_BYTES // 1024}KB）を超えています。",
+            )
+            return
         try:
             raw_bytes = await attachment.read()
             data = json.loads(raw_bytes.decode("utf-8"))
@@ -148,10 +158,8 @@ class Owner(commands.Cog):
                     continue
                 uid = item.get("user_id")
                 spk = item.get("speaker_id")
-                # バリデーション: user_id は数字文字列、speaker_id は整数
-                if not (isinstance(uid, str) and uid.isdigit()):
-                    continue
-                if not isinstance(spk, int):
+                # 保存データの読み込み時と同じ検証を使う（ずれると再起動時に全件破棄される）
+                if not (isinstance(uid, str) and isinstance(spk, int) and is_valid_entry(uid, spk)):
                     continue
                 result[uid] = spk
             return result

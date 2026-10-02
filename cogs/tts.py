@@ -81,6 +81,28 @@ def _voice_client(guild: discord.Guild) -> discord.VoiceClient | None:
     return vc if isinstance(vc, discord.VoiceClient) else None
 
 
+def _listen_permission_error(
+    guild: discord.Guild,
+    channel_id: int,
+    user: discord.abc.User,
+) -> str | None:
+    """読み上げ対象に追加してよいか確認し、不可ならエラーメッセージを返す。
+
+    チャンネル ID を直接指定すると、実行者に見えない非公開チャンネルも指定できてしまうため、
+    実行者と、Bot が接続中の VC にいる全員がそのチャンネルを閲覧できることを確認する。
+    """
+    channel = guild.get_channel(channel_id)
+    member = guild.get_member(user.id)
+    if channel is None or member is None or not channel.permissions_for(member).view_channel:
+        return "⚠️ あなたが閲覧できないチャンネルは読み上げ対象にできません。"
+    vc = _voice_client(guild)
+    if vc is not None:
+        for m in vc.channel.members:
+            if not m.bot and not channel.permissions_for(m).view_channel:
+                return "⚠️ VC 内にこのチャンネルを閲覧できないメンバーがいるため、読み上げ対象にできません。"
+    return None
+
+
 async def _wav_to_pcm(wav_bytes: bytes) -> bytes:
     """VOICEVOX出力WAVをDiscord用PCM(48kHz stereo s16le)に変換する。
     VOICEVOX に 48kHz stereo を指定しているため通常はヘッダ除去のみで済む。
@@ -766,7 +788,12 @@ class TTS(commands.Cog):
         if channel is None:
             await self._send(ctx_or_inter, "⚠️ チャンネルを特定できませんでした。", ephemeral=True)
             return
-        guild = ctx_or_inter.guild
+        guild = _require_guild(ctx_or_inter)
+        user = ctx_or_inter.user if isinstance(ctx_or_inter, discord.Interaction) else ctx_or_inter.author
+        error = _listen_permission_error(guild, channel.id, user)
+        if error:
+            await self._send(ctx_or_inter, error, ephemeral=True)
+            return
         added = self.channel_store.add(guild.id, channel.id)
         msg = f"📢 <#{channel.id}> を読み上げ対象に追加しました。" if added else f"<#{channel.id}> はすでに登録済みです。"
         await self._send(ctx_or_inter, msg)

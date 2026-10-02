@@ -38,6 +38,8 @@ class YomiageBot(commands.Bot):
         intents.message_content = True
         super().__init__(
             command_prefix=PREFIX,
+            # ユーザー入力を含む返信で @everyone などの通知を飛ばさない（表示は維持される）
+            allowed_mentions=discord.AllowedMentions.none(),
             intents=intents,
             help_command=None,  # カスタム help コマンドを使用
         )

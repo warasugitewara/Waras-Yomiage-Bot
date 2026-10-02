@@ -429,7 +429,7 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 
 | コマンド | 説明 |
 |---|---|
-| `!listen add [#ch]` / `/listen add [ch]` | 読み上げチャンネルを追加（省略時は現在のch） |
+| `!listen add [#ch]` / `/listen add [ch]` | 読み上げチャンネルを追加（省略時は現在のch）。実行者と VC 内の全員が閲覧できるチャンネルのみ追加可能 |
 | `!listen remove [#ch]` / `/listen remove [ch]` | 読み上げチャンネルから削除 |
 | `!listen list` / `/listen list` | 登録済みチャンネルを一覧表示 |
 
