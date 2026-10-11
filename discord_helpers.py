@@ -45,17 +45,21 @@ def listen_permission_error(
     guild: discord.Guild,
     channel_id: int,
     user: discord.abc.User,
+    *,
+    check_voice_members: bool = True,
 ) -> str | None:
     """読み上げ対象に追加してよいか確認し、不可ならエラーメッセージを返す。
 
     チャンネル ID を直接指定すると、実行者に見えない非公開チャンネルも指定できてしまうため、
     実行者と、Bot が接続中の VC にいる全員がそのチャンネルを閲覧できることを確認する。
+    check_voice_members=False のときは実行者だけを確認する（/autojoin add は接続中の VC と無関係なため）。
     """
-    channel = guild.get_channel(channel_id)
+    # get_channel はスレッドを検索しないため、スレッドも引ける get_channel_or_thread を使う
+    channel = guild.get_channel_or_thread(channel_id)
     member = guild.get_member(user.id)
     if channel is None or member is None or not channel.permissions_for(member).view_channel:
         return "⚠️ あなたが閲覧できないチャンネルは読み上げ対象にできません。"
-    vc = voice_client_of(guild)
+    vc = voice_client_of(guild) if check_voice_members else None
     if vc is not None:
         for m in vc.channel.members:
             if not m.bot and not channel.permissions_for(m).view_channel:

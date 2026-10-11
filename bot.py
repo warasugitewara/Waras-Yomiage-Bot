@@ -160,6 +160,9 @@ class YomiageBot(commands.Bot):
             commands.DisabledCommand,
             commands.NoPrivateMessage,
             commands.MissingPermissions,
+            # hybrid コマンドのスラッシュ実行では、Cog の interaction_check が投げる
+            # app_commands.NoPrivateMessage などが HybridCommandError に包まれてここへ届く
+            app_commands.CheckFailure,
         )
         if isinstance(original, _ignored):
             msg = _user_error_message(original)
