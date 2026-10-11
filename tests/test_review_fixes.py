@@ -365,6 +365,19 @@ def test_listen_accepts_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     assert tts_mod._listen_permission_error(guild, 10, _user(1)) is None
 
 
+def test_listen_rejects_private_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    """非公開スレッドは、親チャンネルを閲覧できても招待されていないメンバーがいるため拒否する"""
+    monkeypatch.setattr(discord_helpers, "voice_client_of", lambda _g: None)
+    thread = discord.Thread.__new__(discord.Thread)
+    thread._type = discord.ChannelType.private_thread
+    guild = cast(discord.Guild, SimpleNamespace(
+        get_channel_or_thread=lambda _cid: thread,
+        get_member=lambda uid: {1: _member(1)}.get(uid),
+    ))
+    error = discord_helpers.listen_permission_error(guild, 10, _user(1))
+    assert error is not None and "非公開スレッド" in error
+
+
 def test_listen_permission_can_skip_voice_members(monkeypatch: pytest.MonkeyPatch) -> None:
     """/autojoin add 用: 接続中の VC のメンバーは確認しない"""
     members = {1: _member(1), 2: _member(2)}

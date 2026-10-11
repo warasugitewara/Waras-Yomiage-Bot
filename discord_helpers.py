@@ -56,6 +56,10 @@ def listen_permission_error(
     """
     # get_channel はスレッドを検索しないため、スレッドも引ける get_channel_or_thread を使う
     channel = guild.get_channel_or_thread(channel_id)
+    # 非公開スレッドは招待されたメンバーしか見られないが、permissions_for は親チャンネルの権限を返すため
+    # 招待されていない VC メンバーも確認を通ってしまう（メンバー Intent がなく参加者も確実には分からない）
+    if isinstance(channel, discord.Thread) and channel.is_private():
+        return "⚠️ 非公開スレッドは読み上げ対象にできません。"
     member = guild.get_member(user.id)
     if channel is None or member is None or not channel.permissions_for(member).view_channel:
         return "⚠️ あなたが閲覧できないチャンネルは読み上げ対象にできません。"
