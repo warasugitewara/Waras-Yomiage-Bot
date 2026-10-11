@@ -8,13 +8,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from discord_helpers import GuildOnlyCog, require_guild, send_chunks, send_group_usage, send_response
+from discord_helpers import GuildOnlyCog, read_json_attachment, require_guild, send_chunks, send_group_usage
 
 if TYPE_CHECKING:
     from bot import YomiageBot
 
 # 読み替え辞書の上限（巨大入力による負荷・メモリ消費を防ぐ）
-_DICT_IMPORT_MAX_BYTES = 1024 * 1024
 _DICT_MAX_ENTRIES = 5000
 _DICT_WORD_MAX_LEN = 50
 _DICT_READING_MAX_LEN = 100
@@ -60,19 +59,16 @@ class Dictionary(GuildOnlyCog):
     @dict_group.command(name="add", description="読み替え辞書に単語を追加します")
     @app_commands.describe(word="元の単語", reading="読み替え後のテキスト")
     async def dict_add_prefix(self, ctx: commands.Context, word: str, *, reading: str):
-        await self._dict_add(ctx, word, reading)
-
-    async def _dict_add(self, ctx_or_inter, word: str, reading: str):
-        guild_id = ctx_or_inter.guild.id
+        guild_id = require_guild(ctx).id
         error = _validate_dict_entry(word, reading)
         current = self.word_dict.all(guild_id)
         if error is None and word not in current and len(current) >= _DICT_MAX_ENTRIES:
             error = f"⚠️ 辞書の登録数が上限（{_DICT_MAX_ENTRIES}件）に達しています。"
         if error:
-            await send_response(ctx_or_inter, error, ephemeral=True)
+            await ctx.send(error, ephemeral=True)
             return
         self.word_dict.add(guild_id, word, reading)
-        await send_response(ctx_or_inter, f"📖 `{word}` → `{reading}` を辞書に追加しました。")
+        await ctx.send(f"📖 `{word}` → `{reading}` を辞書に追加しました。")
 
     @dict_group.command(name="remove", description="読み替え辞書から単語を削除します")
     @app_commands.describe(word="削除する単語")
@@ -82,41 +78,25 @@ class Dictionary(GuildOnlyCog):
 
     @dict_group.command(name="list", description="読み替え辞書の一覧を表示します")
     async def dict_list_prefix(self, ctx: commands.Context):
-        await self._dict_list(ctx)
-
-    async def _dict_list(self, ctx_or_inter):
-        guild_id = ctx_or_inter.guild.id
+        guild_id = require_guild(ctx).id
         d = self.word_dict.all(guild_id)
         if not d:
-            await send_response(ctx_or_inter, "辞書は空です。", ephemeral=True)
+            await ctx.send("辞書は空です。", ephemeral=True)
             return
         # 件数が多いとチャンネルが連投で埋まるため、JSON ファイル 1 件にまとめて返す
         # （ephemeral はスラッシュ実行でのみ有効。辞書は /dict export でも公開されるため秘匿対象ではない）
         if len(d) > _DICT_LIST_INLINE_MAX:
             msg = f"📖 読み替え辞書（{len(d)}件）は件数が多いためファイルで送ります。"
-            file = _dict_json_file(guild_id, d)
-            if isinstance(ctx_or_inter, discord.Interaction):
-                await ctx_or_inter.response.send_message(msg, file=file, ephemeral=True)
-            else:
-                await ctx_or_inter.send(msg, file=file, ephemeral=True)
+            await ctx.send(msg, file=_dict_json_file(guild_id, d), ephemeral=True)
             return
         lines = "\n".join(f"• `{w}` → `{r}`" for w, r in d.items())
-        await send_chunks(ctx_or_inter, f"📖 読み替え辞書 ({len(d)}件):\n{lines}", ephemeral=True)
+        await send_chunks(ctx, f"📖 読み替え辞書 ({len(d)}件):\n{lines}", ephemeral=True)
 
     @dict_group.command(name="export", description="辞書をJSONファイルとしてエクスポートします")
     async def dict_export_prefix(self, ctx: commands.Context):
-        await self._dict_export(ctx)
-
-    async def _dict_export(self, ctx_or_inter):
-        guild_id = ctx_or_inter.guild.id
+        guild_id = require_guild(ctx).id
         d = self.word_dict.export_dict(guild_id)
-        file = _dict_json_file(guild_id, d)
-        if isinstance(ctx_or_inter, discord.Interaction):
-            await ctx_or_inter.response.send_message(
-                f"📤 辞書をエクスポートしました（{len(d)}件）", file=file
-            )
-        else:
-            await ctx_or_inter.send(f"📤 辞書をエクスポートしました（{len(d)}件）", file=file)
+        await ctx.send(f"📤 辞書をエクスポートしました（{len(d)}件）", file=_dict_json_file(guild_id, d))
 
     @dict_group.command(name="import", description="JSONファイルから辞書をインポートします（サーバー管理権限が必要）")
     @app_commands.describe(
@@ -131,40 +111,25 @@ class Dictionary(GuildOnlyCog):
         replace: bool = False,
     ):
         await ctx.defer()
-        await self._dict_import(ctx, file, replace)
-
-    async def _dict_import(self, ctx_or_inter, attachment: discord.Attachment, replace: bool):
-        if not attachment.filename.lower().endswith(".json"):
-            await send_response(ctx_or_inter, "⚠️ `.json` ファイルのみ対応しています。")
-            return
-        # 読み込み前にサイズを検査（巨大ファイルをメモリへ展開しない）
-        if attachment.size > _DICT_IMPORT_MAX_BYTES:
-            await send_response(
-                ctx_or_inter,
-                f"⚠️ ファイルサイズが上限（{_DICT_IMPORT_MAX_BYTES // 1024}KB）を超えています。",
-            )
-            return
-        try:
-            raw_bytes = await attachment.read()
-            data = json.loads(raw_bytes.decode("utf-8"))
-        except Exception:
-            await send_response(ctx_or_inter, "⚠️ JSONの読み込みに失敗しました。ファイルが正しいか確認してください。")
+        data, error = await read_json_attachment(file)
+        if error:
+            await ctx.send(error)
             return
 
         parsed = self._parse_dict_json(data)
         if parsed is None:
-            await send_response(ctx_or_inter, "⚠️ サポートされていないJSONフォーマットです。")
+            await ctx.send("⚠️ サポートされていないJSONフォーマットです。")
             return
         entries, skipped = parsed
 
         # 空単語は読み上げに影響しないため黙ってスキップする
         entries = {w: r for w, r in entries.items() if w.strip()}
-        guild_id = ctx_or_inter.guild.id
+        guild_id = require_guild(ctx).id
         error = self._check_dict_import(
             entries, {} if replace else self.word_dict.all(guild_id), replace
         )
         if error:
-            await send_response(ctx_or_inter, f"{error}\nインポートは行われませんでした。")
+            await ctx.send(f"{error}\nインポートは行われませんでした。")
             return
 
         count = self.word_dict.import_dict(guild_id, entries, replace=replace)
@@ -172,7 +137,12 @@ class Dictionary(GuildOnlyCog):
         msg = f"📥 辞書を{mode}でインポートしました（{count}件）。"
         if skipped:
             msg += f"\n⚠️ 正規表現のエントリや値が文字列でないエントリ {skipped}件は取り込みませんでした。"
-        await send_response(ctx_or_inter, msg)
+        await ctx.send(msg)
+
+    @commands.Cog.listener()
+    async def on_guild_remove(self, guild: discord.Guild):
+        """サーバーから退出・キックされたら、そのサーバーの辞書を削除する"""
+        self.word_dict.clear(guild.id)
 
     @staticmethod
     def _check_dict_import(

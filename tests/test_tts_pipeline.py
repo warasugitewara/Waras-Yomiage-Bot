@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 import discord
 import pytest
 
+import channel_store
 import cogs.tts as tts_mod
 import tts_pipeline
 from cogs.tts import TTS
@@ -29,7 +30,7 @@ def _make_cog() -> TTS:
     guild = SimpleNamespace(voice_client=object())
     bot = SimpleNamespace(
         user_voice_store=SimpleNamespace(get=lambda _uid: 3),
-        word_dict=WordDict(),  # 以前は TTS が生成していた。読み込みのみで保存はしない
+        word_dict=WordDict(),
         guild_settings=None,
         get_guild=lambda _gid: guild,
         webhook=_FakeWebhook(),
@@ -39,10 +40,13 @@ def _make_cog() -> TTS:
 
 
 @pytest.fixture
-def cog(monkeypatch: pytest.MonkeyPatch):
+def cog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     async def fake_pcm(wav: bytes) -> bytes:
         return b"pcm:" + wav
 
+    # 実データ（data/*.json）を読み書きしないよう、保存先を一時ディレクトリに向ける
+    monkeypatch.setattr(channel_store, "_CHANNELS_FILE", tmp_path / "channels.json")
+    monkeypatch.setattr(channel_store, "_DICT_FILE", tmp_path / "dict.json")
     monkeypatch.setattr(tts_pipeline, "wav_to_pcm", fake_pcm)
     c = _make_cog()
     yield c

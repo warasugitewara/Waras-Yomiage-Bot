@@ -3,7 +3,7 @@
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import discord
 import pytest
@@ -15,6 +15,9 @@ from cogs.owner import Owner
 from cogs.server_settings import ServerSettings
 from json_store import load_json, save_json
 from user_store import _validate_users, is_valid_entry
+
+if TYPE_CHECKING:
+    from bot import YomiageBot
 
 
 # ---- R-2: bool を speaker_id として受け入れない
@@ -121,20 +124,23 @@ async def test_guild_remove_deletes_guild_data(tmp_path: Path, monkeypatch: pyte
 
     monkeypatch.setattr(channel_store, "_CHANNELS_FILE", tmp_path / "channels.json")
     monkeypatch.setattr(channel_store, "_DICT_FILE", tmp_path / "dict.json")
-    bot = SimpleNamespace(user_voice_store=SimpleNamespace(get=lambda _uid: 3), word_dict=None, guild_settings=None)
-    from bot import YomiageBot
-
-    cog = tts_mod.TTS(cast(YomiageBot, bot))
+    bot = cast("YomiageBot", SimpleNamespace(
+        user_voice_store=SimpleNamespace(get=lambda _uid: 3),
+        word_dict=channel_store.WordDict(),
+        guild_settings=GuildSettingsStore(tmp_path / "gs.json"),
+    ))
+    cog = tts_mod.TTS(bot)
     cog.channel_store = channel_store.ChannelStore()
-    cog.word_dict = channel_store.WordDict()
-    cog.guild_settings = GuildSettingsStore(tmp_path / "gs.json")
+    # 辞書・サーバー設定は、それぞれを持つ Cog が削除する
+    cogs = (cog, Dictionary(bot), ServerSettings(bot))
     for gid in (1, 2):
         cog.channel_store.add(gid, 10)
         cog.word_dict.add(gid, "cat", "ねこ")
         cog.guild_settings.set_autojoin(gid, 20, 10)
         cog.guild_settings.add_ignored(gid, 5)
 
-    await cog.on_guild_remove(cast(discord.Guild, SimpleNamespace(id=1)))
+    for c in cogs:
+        await c.on_guild_remove(cast(discord.Guild, SimpleNamespace(id=1)))
 
     assert cog.channel_store.get(1) == set()
     assert cog.word_dict.all(1) == {}
@@ -246,7 +252,7 @@ async def test_credits_in_use_and_allowed_speakers(monkeypatch: pytest.MonkeyPat
     await cog.cog_unload()
 
 
-# ---- コードレビュー（2026-10-11）: 全置換インポートで辞書を空にしない
+# ---- コードレビュー（2026-10-11）: 全置換インポートで辞書を空にしない / 拡張子の大文字小文字
 
 
 def test_replace_import_with_no_entries_is_rejected() -> None:
@@ -254,6 +260,32 @@ def test_replace_import_with_no_entries_is_rejected() -> None:
     # マージでは既存の辞書が残るため拒否しない
     assert Dictionary._check_dict_import({}, {"cat": "ねこ"}, replace=False) is None
     assert Dictionary._check_dict_import({"cat": "ねこ"}, {}, replace=True) is None
+
+
+class _FakeAttachment:
+    def __init__(self, filename: str, body: bytes, size: int | None = None) -> None:
+        self.filename = filename
+        self.size = len(body) if size is None else size
+        self._body = body
+
+    async def read(self) -> bytes:
+        return self._body
+
+
+async def test_read_json_attachment() -> None:
+    read = discord_helpers.read_json_attachment
+
+    def att(filename: str, body: bytes, size: int | None = None) -> discord.Attachment:
+        return cast(discord.Attachment, _FakeAttachment(filename, body, size))
+
+    assert await read(att("DICT.JSON", b'{"a": "b"}')) == ({"a": "b"}, None)
+    for bad in (
+        att("dict.txt", b"{}"),
+        att("dict.json", b"{}", size=discord_helpers.JSON_IMPORT_MAX_BYTES + 1),
+        att("dict.json", b"not json"),
+    ):
+        data, error = await read(bad)
+        assert data is None and error is not None
 
 
 # ---- コードレビュー（2026-10-11）: /autojoin add も読み上げ先の閲覧権限を確認する
@@ -272,12 +304,11 @@ class _FakeCtx:
 async def test_autojoin_add_rejects_channel_invisible_to_author(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from bot import YomiageBot
     from guild_settings import GuildSettingsStore
 
     monkeypatch.setattr(discord_helpers, "voice_client_of", lambda _g: None)
     store = GuildSettingsStore(tmp_path / "gs.json")
-    cog = ServerSettings(cast(YomiageBot, SimpleNamespace(guild_settings=store)))
+    cog = ServerSettings(cast("YomiageBot", SimpleNamespace(guild_settings=store)))
     channel, members = _FakeChannel({1}), {1: _member(1), 2: _member(2)}
     guild = SimpleNamespace(
         id=1,

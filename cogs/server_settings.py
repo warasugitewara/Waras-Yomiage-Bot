@@ -6,14 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from discord_helpers import (
-    GuildOnlyCog,
-    listen_permission_error,
-    require_guild,
-    send_chunks,
-    send_group_usage,
-    send_response,
-)
+from discord_helpers import GuildOnlyCog, listen_permission_error, require_guild, send_chunks, send_group_usage
 
 if TYPE_CHECKING:
     from bot import YomiageBot
@@ -45,43 +38,33 @@ class ServerSettings(GuildOnlyCog):
         vc: discord.VoiceChannel,
         text: discord.TextChannel | None = None,
     ):
-        await self._autojoin_add(ctx, vc, text)
-
-    async def _autojoin_add(self, ctx_or_inter, vc: discord.VoiceChannel, text: discord.TextChannel | None):
-        guild = require_guild(ctx_or_inter)
+        guild = require_guild(ctx)
         perms = vc.permissions_for(guild.me)
         if not (perms.connect and perms.speak):
-            await send_response(ctx_or_inter, f"⚠️ <#{vc.id}> に接続・発言する権限が Bot にありません。", ephemeral=True)
+            await ctx.send(f"⚠️ <#{vc.id}> に接続・発言する権限が Bot にありません。", ephemeral=True)
             return
         # テキストチャンネル未指定時は VC 内チャット（VC と同じ ID）を読み上げる
         text_id = text.id if text else vc.id
         # /listen add と同じく、実行者が閲覧できないチャンネルは読み上げ先にできない
-        user = ctx_or_inter.user if isinstance(ctx_or_inter, discord.Interaction) else ctx_or_inter.author
-        error = listen_permission_error(guild, text_id, user)
+        error = listen_permission_error(guild, text_id, ctx.author)
         if error:
-            await send_response(ctx_or_inter, error, ephemeral=True)
+            await ctx.send(error, ephemeral=True)
             return
         self.guild_settings.set_autojoin(guild.id, vc.id, text_id)
-        await send_response(ctx_or_inter, f"🔁 <#{vc.id}> に人が入ったら自動参加し、<#{text_id}> を読み上げます。")
+        await ctx.send(f"🔁 <#{vc.id}> に人が入ったら自動参加し、<#{text_id}> を読み上げます。")
 
     @autojoin_group.command(name="remove", description="自動参加 VC の登録を解除します")
     @app_commands.describe(vc="解除するボイスチャンネル")
     @commands.has_permissions(manage_guild=True)
     async def autojoin_remove_prefix(self, ctx: commands.Context, vc: discord.VoiceChannel):
-        await self._autojoin_remove(ctx, vc)
-
-    async def _autojoin_remove(self, ctx_or_inter, vc: discord.VoiceChannel):
-        removed = self.guild_settings.remove_autojoin(require_guild(ctx_or_inter).id, vc.id)
+        removed = self.guild_settings.remove_autojoin(require_guild(ctx).id, vc.id)
         msg = f"🛑 <#{vc.id}> の自動参加を解除しました。" if removed else f"<#{vc.id}> は自動参加に登録されていません。"
-        await send_response(ctx_or_inter, msg)
+        await ctx.send(msg)
 
     @autojoin_group.command(name="list", description="自動参加 VC の一覧を表示します")
     @commands.has_permissions(manage_guild=True)
     async def autojoin_list_prefix(self, ctx: commands.Context):
-        await self._autojoin_list(ctx)
-
-    async def _autojoin_list(self, ctx_or_inter):
-        guild = require_guild(ctx_or_inter)
+        guild = require_guild(ctx)
         entries = self.guild_settings.autojoin_all(guild.id)
         # 削除済みの VC は /autojoin remove で指定できないため、ここで登録を解除する
         stale = [vc_id for vc_id in entries if guild.get_channel(vc_id) is None]
@@ -95,12 +78,17 @@ class ServerSettings(GuildOnlyCog):
             msg = f"🔁 自動参加 VC（VC → 読み上げ先）:\n{lines}"
         if stale:
             msg += f"\n（削除済みの VC {len(stale)}件の登録を解除しました）"
-        await send_chunks(ctx_or_inter, msg)
+        await send_chunks(ctx, msg)
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         """削除された VC の自動参加登録を解除する"""
         self.guild_settings.remove_autojoin(channel.guild.id, channel.id)
+
+    @commands.Cog.listener()
+    async def on_guild_remove(self, guild: discord.Guild):
+        """サーバーから退出・キックされたら、そのサーバーの設定を削除する"""
+        self.guild_settings.clear(guild.id)
 
     # ------------------------------------------------------------------ #
     # ignore サブコマンドグループ（読み上げ除外ユーザー）
@@ -114,51 +102,37 @@ class ServerSettings(GuildOnlyCog):
     @app_commands.describe(user="除外するユーザー")
     @commands.has_permissions(manage_guild=True)
     async def ignore_add_prefix(self, ctx: commands.Context, user: discord.Member):
-        await self._ignore_add(ctx, user)
-
-    async def _ignore_add(self, ctx_or_inter, user: discord.Member):
-        added = self.guild_settings.add_ignored(require_guild(ctx_or_inter).id, user.id)
+        added = self.guild_settings.add_ignored(require_guild(ctx).id, user.id)
         msg = f"🔕 <@{user.id}> のメッセージを読み上げ対象外にしました。" if added else f"<@{user.id}> はすでに除外されています。"
-        await send_response(ctx_or_inter, msg, ephemeral=True)
+        await ctx.send(msg, ephemeral=True)
 
     @ignore_group.command(name="remove", description="ユーザーの読み上げ除外を解除します（サーバー管理権限が必要）")
     @app_commands.describe(user="除外を解除するユーザー")
     @commands.has_permissions(manage_guild=True)
     # サーバーを退出したユーザーも解除できるよう、Member ではなく User で受ける
     async def ignore_remove_prefix(self, ctx: commands.Context, user: discord.User):
-        await self._ignore_remove(ctx, user)
-
-    async def _ignore_remove(self, ctx_or_inter, user: discord.User):
-        removed = self.guild_settings.remove_ignored(require_guild(ctx_or_inter).id, user.id)
+        removed = self.guild_settings.remove_ignored(require_guild(ctx).id, user.id)
         msg = f"🔔 <@{user.id}> の読み上げ除外を解除しました。" if removed else f"<@{user.id}> は除外されていません。"
-        await send_response(ctx_or_inter, msg, ephemeral=True)
+        await ctx.send(msg, ephemeral=True)
 
     @ignore_group.command(name="list", description="読み上げ除外ユーザーの一覧を表示します（サーバー管理権限が必要）")
     @commands.has_permissions(manage_guild=True)
     async def ignore_list_prefix(self, ctx: commands.Context):
-        await self._ignore_list(ctx)
-
-    async def _ignore_list(self, ctx_or_inter):
-        ignored = self.guild_settings.ignored_all(require_guild(ctx_or_inter).id)
+        ignored = self.guild_settings.ignored_all(require_guild(ctx).id)
         if not ignored:
             msg = "読み上げ除外ユーザーはいません。"
         else:
             lines = "\n".join(f"• <@{uid}>" for uid in sorted(ignored))
             msg = f"🔕 読み上げ除外ユーザー ({len(ignored)}人):\n{lines}"
-        await send_chunks(ctx_or_inter, msg, ephemeral=True)
+        await send_chunks(ctx, msg, ephemeral=True)
 
     @ignore_group.command(name="me", description="自分のメッセージの読み上げ除外を切り替えます")
     async def ignore_me_prefix(self, ctx: commands.Context):
-        await self._ignore_me(ctx)
-
-    async def _ignore_me(self, ctx_or_inter):
-        guild = require_guild(ctx_or_inter)
-        user = ctx_or_inter.user if isinstance(ctx_or_inter, discord.Interaction) else ctx_or_inter.author
-        if self.guild_settings.toggle_ignored(guild.id, user.id):
+        if self.guild_settings.toggle_ignored(require_guild(ctx).id, ctx.author.id):
             msg = "🔕 あなたのメッセージを読み上げ対象外にしました。もう一度実行すると戻ります。"
         else:
             msg = "🔔 あなたのメッセージを再び読み上げます。"
-        await send_response(ctx_or_inter, msg, ephemeral=True)
+        await ctx.send(msg, ephemeral=True)
 
     # ------------------------------------------------------------------ #
     # readname（発言者名の読み上げ、管理者向け）

@@ -8,11 +8,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from discord_helpers import send_group_usage, send_response
+from discord_helpers import read_json_attachment, send_group_usage, send_response
 from user_store import is_valid_entry
-
-# インポートファイルの上限（辞書インポートと同じ 1MB）
-_IMPORT_MAX_BYTES = 1024 * 1024
 
 if TYPE_CHECKING:
     from bot import YomiageBot
@@ -116,20 +113,9 @@ class Owner(commands.Cog):
         await self._import_users(inter, file, replace)
 
     async def _import_users(self, ctx_or_inter, attachment: discord.Attachment, replace: bool):
-        if not attachment.filename.endswith(".json"):
-            await self._send(ctx_or_inter, "⚠️ `.json` ファイルのみ対応しています。")
-            return
-        if attachment.size > _IMPORT_MAX_BYTES:
-            await self._send(
-                ctx_or_inter,
-                f"⚠️ ファイルサイズが上限（{_IMPORT_MAX_BYTES // 1024}KB）を超えています。",
-            )
-            return
-        try:
-            raw_bytes = await attachment.read()
-            data = json.loads(raw_bytes.decode("utf-8"))
-        except Exception:
-            await self._send(ctx_or_inter, "⚠️ JSONの読み込みに失敗しました。")
+        data, error = await read_json_attachment(attachment)
+        if error:
+            await self._send(ctx_or_inter, error)
             return
 
         entries = self._parse_users_json(data)
@@ -146,7 +132,7 @@ class Owner(commands.Cog):
         await self._send(ctx_or_inter, f"📥 ユーザー設定を{mode}でインポートしました（{count}件）。")
 
     @staticmethod
-    def _parse_users_json(data: dict) -> dict[str, int] | None:
+    def _parse_users_json(data: object) -> dict[str, int] | None:
         """JSONを {user_id_str: speaker_id_int} に変換する。無効エントリはスキップ。"""
         if not isinstance(data, dict):
             return None

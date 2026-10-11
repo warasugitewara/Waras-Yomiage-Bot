@@ -246,12 +246,6 @@ class TTS(GuildOnlyCog):
         entry = self._speaker_id_map.get(speaker_id)
         return credit_for(entry[0]) if entry else None
 
-    async def _send(self, ctx_or_inter, msg: str, ephemeral: bool = False):
-        await send_response(ctx_or_inter, msg, ephemeral=ephemeral)
-
-    async def _send_chunks(self, ctx_or_inter, text: str, ephemeral: bool = False):
-        await send_chunks(ctx_or_inter, text, ephemeral=ephemeral)
-
     # ------------------------------------------------------------------ #
     # Basic commands
     # ------------------------------------------------------------------ #
@@ -347,7 +341,7 @@ class TTS(GuildOnlyCog):
     async def _myvoice_set(self, ctx_or_inter, speaker_id: int):
         valid_ids = await self._get_valid_speaker_ids()
         if valid_ids is not None and speaker_id not in valid_ids:
-            await self._send(
+            await send_response(
                 ctx_or_inter,
                 f"⚠️ ID `{speaker_id}` は存在しません。`/myvoice list` で有効なIDを確認してください。",
                 ephemeral=True,
@@ -363,7 +357,7 @@ class TTS(GuildOnlyCog):
         credit = await self._resolve_credit(speaker_id)
         if credit:
             msg += f"\n📜 クレジット: `{credit}`（キャラクターの利用規約に従ってご利用ください）"
-        await self._send(ctx_or_inter, msg)
+        await send_response(ctx_or_inter, msg)
 
     # --- reset ---
 
@@ -379,7 +373,7 @@ class TTS(GuildOnlyCog):
             else ctx_or_inter.user.id
         )
         self.user_voice.reset(user_id)
-        await self._send(ctx_or_inter, f"🔄 ボイスをデフォルト（ID `{self.default_speaker}`）にリセットしました。")
+        await send_response(ctx_or_inter, f"🔄 ボイスをデフォルト（ID `{self.default_speaker}`）にリセットしました。")
 
     # --- info ---
 
@@ -401,7 +395,7 @@ class TTS(GuildOnlyCog):
         credit = await self._resolve_credit(speaker_id)
         if credit:
             msg += f"\n📜 クレジット: `{credit}`"
-        await self._send(ctx_or_inter, msg, ephemeral=True)
+        await send_response(ctx_or_inter, msg, ephemeral=True)
 
     # --- list ---
 
@@ -412,7 +406,7 @@ class TTS(GuildOnlyCog):
 
     async def _myvoice_list(self, ctx_or_inter):
         if not await self._ensure_speakers_cache():
-            await self._send(ctx_or_inter, "⚠️ VOICEVOX に接続できません。", ephemeral=True)
+            await send_response(ctx_or_inter, "⚠️ VOICEVOX に接続できません。", ephemeral=True)
             return
 
         lines = ["🎤 **利用可能なスピーカー一覧**\n"]
@@ -424,7 +418,7 @@ class TTS(GuildOnlyCog):
             )
             lines.append(f"**{sp['name']}**\n　{styles}")
 
-        await self._send_chunks(ctx_or_inter, "\n".join(lines), ephemeral=True)
+        await send_chunks(ctx_or_inter, "\n".join(lines), ephemeral=True)
 
     # /voice を /myvoice set のエイリアスとして残す
     @commands.hybrid_command(name="voice", description="自分の読み上げボイスを設定します（/myvoice set と同じ）")
@@ -448,17 +442,17 @@ class TTS(GuildOnlyCog):
 
     async def _listen_add(self, ctx_or_inter, channel: discord.abc.Snowflake | None):
         if channel is None:
-            await self._send(ctx_or_inter, "⚠️ チャンネルを特定できませんでした。", ephemeral=True)
+            await send_response(ctx_or_inter, "⚠️ チャンネルを特定できませんでした。", ephemeral=True)
             return
         guild = _require_guild(ctx_or_inter)
         user = ctx_or_inter.user if isinstance(ctx_or_inter, discord.Interaction) else ctx_or_inter.author
         error = _listen_permission_error(guild, channel.id, user)
         if error:
-            await self._send(ctx_or_inter, error, ephemeral=True)
+            await send_response(ctx_or_inter, error, ephemeral=True)
             return
         added = self.channel_store.add(guild.id, channel.id)
         msg = f"📢 <#{channel.id}> を読み上げ対象に追加しました。" if added else f"<#{channel.id}> はすでに登録済みです。"
-        await self._send(ctx_or_inter, msg)
+        await send_response(ctx_or_inter, msg)
 
     @listen_group.command(name="remove", description="読み上げ対象チャンネルを削除します")
     @app_commands.describe(channel="削除するテキストチャンネル（省略時は現在のチャンネル）")
@@ -467,12 +461,12 @@ class TTS(GuildOnlyCog):
 
     async def _listen_remove(self, ctx_or_inter, channel: discord.abc.Snowflake | None):
         if channel is None:
-            await self._send(ctx_or_inter, "⚠️ チャンネルを特定できませんでした。", ephemeral=True)
+            await send_response(ctx_or_inter, "⚠️ チャンネルを特定できませんでした。", ephemeral=True)
             return
         guild = ctx_or_inter.guild
         removed = self.channel_store.remove(guild.id, channel.id)
         msg = f"🔇 <#{channel.id}> を読み上げ対象から削除しました。" if removed else f"<#{channel.id}> は登録されていません。"
-        await self._send(ctx_or_inter, msg)
+        await send_response(ctx_or_inter, msg)
 
     @listen_group.command(name="list", description="読み上げ対象チャンネル一覧を表示します")
     async def listen_list_prefix(self, ctx: commands.Context):
@@ -485,7 +479,7 @@ class TTS(GuildOnlyCog):
         else:
             lines = "\n".join(f"• <#{cid}>" for cid in channels)
             msg = f"📋 読み上げ対象チャンネル:\n{lines}"
-        await self._send(ctx_or_inter, msg)
+        await send_response(ctx_or_inter, msg)
 
     # ------------------------------------------------------------------ #
     # Voice state event
@@ -556,7 +550,7 @@ class TTS(GuildOnlyCog):
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
-        """サーバーから退出・キックされたら、そのサーバーのデータを削除する"""
+        """サーバーから退出・キックされたら、そのサーバーのデータを削除する（辞書・サーバー設定は各 Cog が削除）"""
         guild_id = guild.id
         self._cancel_auto_leave(guild_id)
         self.playback.stop(guild_id)
@@ -564,8 +558,6 @@ class TTS(GuildOnlyCog):
         self._last_author.pop(guild_id, None)
         self._autojoin_locks.pop(guild_id, None)
         self.channel_store.clear(guild_id)
-        self.word_dict.clear(guild_id)
-        self.guild_settings.clear(guild_id)
         print(f"[GUILD REMOVE] サーバー {guild_id} のデータを削除しました")
 
     # ------------------------------------------------------------------ #

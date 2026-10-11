@@ -1,11 +1,16 @@
 """Cog 共通の Discord 送信ヘルパー"""
 
+import json
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 # Discord メッセージの安全な最大文字数
 _DISCORD_MAX = 1900
+
+# インポートする JSON ファイルの上限（巨大ファイルをメモリへ展開しない）
+JSON_IMPORT_MAX_BYTES = 1024 * 1024
 
 
 def require_guild(ctx_or_inter: commands.Context | discord.Interaction) -> discord.Guild:
@@ -56,6 +61,20 @@ def listen_permission_error(
             if not m.bot and not channel.permissions_for(m).view_channel:
                 return "⚠️ VC 内にこのチャンネルを閲覧できないメンバーがいるため、読み上げ対象にできません。"
     return None
+
+
+async def read_json_attachment(attachment: discord.Attachment) -> tuple[object, str | None]:
+    """添付の JSON ファイルを読み込み、(データ, エラーメッセージ) を返す。失敗時はデータが None"""
+    if not attachment.filename.lower().endswith(".json"):
+        return None, "⚠️ `.json` ファイルのみ対応しています。"
+    # 読み込み前にサイズを検査（巨大ファイルをメモリへ展開しない）
+    if attachment.size > JSON_IMPORT_MAX_BYTES:
+        return None, f"⚠️ ファイルサイズが上限（{JSON_IMPORT_MAX_BYTES // 1024}KB）を超えています。"
+    try:
+        raw_bytes = await attachment.read()
+        return json.loads(raw_bytes.decode("utf-8")), None
+    except Exception:
+        return None, "⚠️ JSONの読み込みに失敗しました。ファイルが正しいか確認してください。"
 
 
 async def send_response(
