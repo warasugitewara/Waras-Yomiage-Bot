@@ -59,7 +59,7 @@ class Dictionary(GuildOnlyCog):
 
     @dict_group.command(name="add", description="読み替え辞書に単語を追加します")
     @app_commands.describe(word="元の単語", reading="読み替え後のテキスト")
-    async def dict_add_prefix(self, ctx: commands.Context, word: str, reading: str):
+    async def dict_add_prefix(self, ctx: commands.Context, word: str, *, reading: str):
         await self._dict_add(ctx, word, reading)
 
     async def _dict_add(self, ctx_or_inter, word: str, reading: str):
@@ -90,7 +90,8 @@ class Dictionary(GuildOnlyCog):
         if not d:
             await send_response(ctx_or_inter, "辞書は空です。", ephemeral=True)
             return
-        # 件数が多いとチャンネルが連投で埋まるため、JSON ファイルにまとめて本人にだけ返す
+        # 件数が多いとチャンネルが連投で埋まるため、JSON ファイル 1 件にまとめて返す
+        # （ephemeral はスラッシュ実行でのみ有効。辞書は /dict export でも公開されるため秘匿対象ではない）
         if len(d) > _DICT_LIST_INLINE_MAX:
             msg = f"📖 読み替え辞書（{len(d)}件）は件数が多いためファイルで送ります。"
             file = _dict_json_file(guild_id, d)
@@ -133,7 +134,7 @@ class Dictionary(GuildOnlyCog):
         await self._dict_import(ctx, file, replace)
 
     async def _dict_import(self, ctx_or_inter, attachment: discord.Attachment, replace: bool):
-        if not attachment.filename.endswith(".json"):
+        if not attachment.filename.lower().endswith(".json"):
             await send_response(ctx_or_inter, "⚠️ `.json` ファイルのみ対応しています。")
             return
         # 読み込み前にサイズを検査（巨大ファイルをメモリへ展開しない）
@@ -160,7 +161,7 @@ class Dictionary(GuildOnlyCog):
         entries = {w: r for w, r in entries.items() if w.strip()}
         guild_id = ctx_or_inter.guild.id
         error = self._check_dict_import(
-            entries, {} if replace else self.word_dict.all(guild_id)
+            entries, {} if replace else self.word_dict.all(guild_id), replace
         )
         if error:
             await send_response(ctx_or_inter, f"{error}\nインポートは行われませんでした。")
@@ -174,8 +175,13 @@ class Dictionary(GuildOnlyCog):
         await send_response(ctx_or_inter, msg)
 
     @staticmethod
-    def _check_dict_import(entries: dict[str, str], current: dict[str, str]) -> str | None:
+    def _check_dict_import(
+        entries: dict[str, str], current: dict[str, str], replace: bool = False
+    ) -> str | None:
         """インポート内容を検証する。1件でも不正なら全体を拒否するためエラーを返す"""
+        # 全置換で 0 件を取り込むと既存の辞書が消えるため拒否する
+        if replace and not entries:
+            return "⚠️ 取り込めるエントリがありません（全置換すると辞書が空になります）。"
         for word, reading in entries.items():
             error = _validate_dict_entry(word, reading)
             if error:

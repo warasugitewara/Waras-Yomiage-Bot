@@ -10,6 +10,7 @@ from discord.ext import commands
 from channel_store import ChannelStore
 from config import get_config
 from discord_helpers import GuildOnlyCog, send_chunks, send_group_usage, send_response
+from discord_helpers import listen_permission_error as _listen_permission_error
 from discord_helpers import require_guild as _require_guild
 from discord_helpers import voice_client_of as _voice_client
 from text_filter import filter_message
@@ -35,28 +36,6 @@ _CREDIT_OVERRIDES = {
 def credit_for(character: str) -> str:
     """キャラクター名から VOICEVOX のクレジット表記を返す"""
     return _CREDIT_OVERRIDES.get(character, f"VOICEVOX:{character}")
-
-
-def _listen_permission_error(
-    guild: discord.Guild,
-    channel_id: int,
-    user: discord.abc.User,
-) -> str | None:
-    """読み上げ対象に追加してよいか確認し、不可ならエラーメッセージを返す。
-
-    チャンネル ID を直接指定すると、実行者に見えない非公開チャンネルも指定できてしまうため、
-    実行者と、Bot が接続中の VC にいる全員がそのチャンネルを閲覧できることを確認する。
-    """
-    channel = guild.get_channel(channel_id)
-    member = guild.get_member(user.id)
-    if channel is None or member is None or not channel.permissions_for(member).view_channel:
-        return "⚠️ あなたが閲覧できないチャンネルは読み上げ対象にできません。"
-    vc = _voice_client(guild)
-    if vc is not None:
-        for m in vc.channel.members:
-            if not m.bot and not channel.permissions_for(m).view_channel:
-                return "⚠️ VC 内にこのチャンネルを閲覧できないメンバーがいるため、読み上げ対象にできません。"
-    return None
 
 
 class TTS(GuildOnlyCog):

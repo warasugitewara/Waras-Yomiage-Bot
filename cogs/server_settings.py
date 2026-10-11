@@ -6,7 +6,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from discord_helpers import GuildOnlyCog, require_guild, send_chunks, send_group_usage, send_response
+from discord_helpers import (
+    GuildOnlyCog,
+    listen_permission_error,
+    require_guild,
+    send_chunks,
+    send_group_usage,
+    send_response,
+)
 
 if TYPE_CHECKING:
     from bot import YomiageBot
@@ -48,6 +55,12 @@ class ServerSettings(GuildOnlyCog):
             return
         # テキストチャンネル未指定時は VC 内チャット（VC と同じ ID）を読み上げる
         text_id = text.id if text else vc.id
+        # /listen add と同じく、実行者が閲覧できないチャンネルは読み上げ先にできない
+        user = ctx_or_inter.user if isinstance(ctx_or_inter, discord.Interaction) else ctx_or_inter.author
+        error = listen_permission_error(guild, text_id, user)
+        if error:
+            await send_response(ctx_or_inter, error, ephemeral=True)
+            return
         self.guild_settings.set_autojoin(guild.id, vc.id, text_id)
         await send_response(ctx_or_inter, f"🔁 <#{vc.id}> に人が入ったら自動参加し、<#{text_id}> を読み上げます。")
 
@@ -68,13 +81,26 @@ class ServerSettings(GuildOnlyCog):
         await self._autojoin_list(ctx)
 
     async def _autojoin_list(self, ctx_or_inter):
-        entries = self.guild_settings.autojoin_all(require_guild(ctx_or_inter).id)
+        guild = require_guild(ctx_or_inter)
+        entries = self.guild_settings.autojoin_all(guild.id)
+        # 削除済みの VC は /autojoin remove で指定できないため、ここで登録を解除する
+        stale = [vc_id for vc_id in entries if guild.get_channel(vc_id) is None]
+        for vc_id in stale:
+            self.guild_settings.remove_autojoin(guild.id, vc_id)
+            del entries[vc_id]
         if not entries:
             msg = "自動参加する VC は登録されていません。"
         else:
             lines = "\n".join(f"• <#{vc_id}> → <#{text_id}>" for vc_id, text_id in entries.items())
             msg = f"🔁 自動参加 VC（VC → 読み上げ先）:\n{lines}"
+        if stale:
+            msg += f"\n（削除済みの VC {len(stale)}件の登録を解除しました）"
         await send_chunks(ctx_or_inter, msg)
+
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        """削除された VC の自動参加登録を解除する"""
+        self.guild_settings.remove_autojoin(channel.guild.id, channel.id)
 
     # ------------------------------------------------------------------ #
     # ignore サブコマンドグループ（読み上げ除外ユーザー）
@@ -98,10 +124,11 @@ class ServerSettings(GuildOnlyCog):
     @ignore_group.command(name="remove", description="ユーザーの読み上げ除外を解除します（サーバー管理権限が必要）")
     @app_commands.describe(user="除外を解除するユーザー")
     @commands.has_permissions(manage_guild=True)
-    async def ignore_remove_prefix(self, ctx: commands.Context, user: discord.Member):
+    # サーバーを退出したユーザーも解除できるよう、Member ではなく User で受ける
+    async def ignore_remove_prefix(self, ctx: commands.Context, user: discord.User):
         await self._ignore_remove(ctx, user)
 
-    async def _ignore_remove(self, ctx_or_inter, user: discord.Member):
+    async def _ignore_remove(self, ctx_or_inter, user: discord.User):
         removed = self.guild_settings.remove_ignored(require_guild(ctx_or_inter).id, user.id)
         msg = f"🔔 <@{user.id}> の読み上げ除外を解除しました。" if removed else f"<@{user.id}> は除外されていません。"
         await send_response(ctx_or_inter, msg, ephemeral=True)

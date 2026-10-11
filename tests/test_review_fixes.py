@@ -1,5 +1,6 @@
 """レビュー報告書 R-1 / R-2 / R-3 の回帰テスト"""
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -8,8 +9,10 @@ import discord
 import pytest
 
 import cogs.tts as tts_mod
+import discord_helpers
 from cogs.dictionary import Dictionary
 from cogs.owner import Owner
+from cogs.server_settings import ServerSettings
 from json_store import load_json, save_json
 from user_store import _validate_users, is_valid_entry
 
@@ -66,7 +69,7 @@ def _user(uid: int) -> discord.abc.User:
 
 
 def test_listen_rejects_channel_invisible_to_author(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tts_mod, "_voice_client", lambda _g: None)
+    monkeypatch.setattr(discord_helpers, "voice_client_of", lambda _g: None)
     members = {1: _member(1), 2: _member(2)}
     guild = _guild(_FakeChannel({1}), members)
     assert tts_mod._listen_permission_error(guild, 10, _user(1)) is None
@@ -79,7 +82,7 @@ def test_listen_rejects_channel_invisible_to_vc_member(monkeypatch: pytest.Monke
     members = {1: _member(1), 2: _member(2)}
     vc_members = [_member(1), _member(2), _member(99, bot=True)]
     monkeypatch.setattr(
-        tts_mod, "_voice_client",
+        discord_helpers, "voice_client_of",
         lambda _g: SimpleNamespace(channel=SimpleNamespace(members=vc_members)),
     )
     # Bot は閲覧権限の確認対象外
@@ -241,3 +244,56 @@ async def test_credits_in_use_and_allowed_speakers(monkeypatch: pytest.MonkeyPat
     assert cog._effective_speaker(2) == cog.default_speaker
     assert cog._effective_speaker(1) == 20
     await cog.cog_unload()
+
+
+# ---- コードレビュー（2026-10-11）: 全置換インポートで辞書を空にしない
+
+
+def test_replace_import_with_no_entries_is_rejected() -> None:
+    assert Dictionary._check_dict_import({}, {}, replace=True) is not None
+    # マージでは既存の辞書が残るため拒否しない
+    assert Dictionary._check_dict_import({}, {"cat": "ねこ"}, replace=False) is None
+    assert Dictionary._check_dict_import({"cat": "ねこ"}, {}, replace=True) is None
+
+
+# ---- コードレビュー（2026-10-11）: /autojoin add も読み上げ先の閲覧権限を確認する
+
+
+class _FakeCtx:
+    def __init__(self, guild: object, author: object) -> None:
+        self.guild = guild
+        self.author = author
+        self.sent: list[str] = []
+
+    async def send(self, msg: str, **_kwargs: object) -> None:
+        self.sent.append(msg)
+
+
+async def test_autojoin_add_rejects_channel_invisible_to_author(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bot import YomiageBot
+    from guild_settings import GuildSettingsStore
+
+    monkeypatch.setattr(discord_helpers, "voice_client_of", lambda _g: None)
+    store = GuildSettingsStore(tmp_path / "gs.json")
+    cog = ServerSettings(cast(YomiageBot, SimpleNamespace(guild_settings=store)))
+    channel, members = _FakeChannel({1}), {1: _member(1), 2: _member(2)}
+    guild = SimpleNamespace(
+        id=1,
+        me=_member(99, bot=True),
+        get_channel=lambda _cid: channel,
+        get_member=lambda uid: members.get(uid),
+    )
+    vc = SimpleNamespace(id=20, permissions_for=lambda _m: SimpleNamespace(connect=True, speak=True))
+    text = SimpleNamespace(id=10)
+    # Cog を bot に登録していないため、コマンドの本体を直接呼ぶ
+    add = cast(Callable[..., Awaitable[None]], ServerSettings.autojoin_add_prefix.callback)
+
+    ctx = _FakeCtx(guild, _member(2))
+    await add(cog, ctx, vc, text)
+    assert store.autojoin_all(1) == {} and "閲覧できない" in ctx.sent[0]
+
+    ctx = _FakeCtx(guild, _member(1))
+    await add(cog, ctx, vc, text)
+    assert store.autojoin_all(1) == {20: 10}
