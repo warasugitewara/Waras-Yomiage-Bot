@@ -340,7 +340,8 @@ class TTS(GuildOnlyCog):
 
     async def _myvoice_set(self, ctx_or_inter, speaker_id: int):
         valid_ids = await self._get_valid_speaker_ids()
-        if valid_ids is not None and speaker_id not in valid_ids:
+        # ENGINE に接続できず ID の実在を確認できないときも、ALLOWED_SPEAKERS の制限は守る
+        if not self._config.is_speaker_allowed(speaker_id) or (valid_ids is not None and speaker_id not in valid_ids):
             await send_response(
                 ctx_or_inter,
                 f"⚠️ ID `{speaker_id}` は存在しません。`/myvoice list` で有効なIDを確認してください。",
@@ -388,10 +389,14 @@ class TTS(GuildOnlyCog):
             if isinstance(ctx_or_inter, commands.Context)
             else ctx_or_inter.user.id
         )
-        speaker_id = self.user_voice.get(user_id)
+        # 実際に読み上げに使うボイス（と、そのクレジット）を表示する
+        stored_id = self.user_voice.get(user_id)
+        speaker_id = self._effective_speaker(user_id)
         name = await self._resolve_speaker_name(speaker_id)
         label = f"`{name}`" if name else f"ID `{speaker_id}`"
         msg = f"🎤 現在のボイス: {label} (ID: `{speaker_id}`)"
+        if speaker_id != stored_id:
+            msg += f"\n⚠️ 設定中の ID `{stored_id}` はこのBotでは使用できないため、デフォルトのボイスで読み上げています。"
         credit = await self._resolve_credit(speaker_id)
         if credit:
             msg += f"\n📜 クレジット: `{credit}`"

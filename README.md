@@ -413,7 +413,7 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 | `!speed <値>` / `/speed <値>` | サーバー管理 | サーバー全体の読み上げ速度を変更（0.5〜2.0） |
 | `!dict import` / `/dict import` | サーバー管理 | 辞書のインポート（詳細は「読み替え辞書」を参照） |
 | `!reload_speakers` / `/reload_speakers` | サーバー管理 | VOICEVOXのスピーカー情報キャッシュを再取得（ENGINE更新後などに使用） |
-| `!autojoin add <VC> [#ch]` / `/autojoin add <vc> [text]` | サーバー管理 | VC に人が入ったら自動参加して指定チャンネルを読み上げる（省略時は VC 内チャット） |
+| `!autojoin add <VC> [#ch]` / `/autojoin add <vc> [text]` | サーバー管理 | VC に人が入ったら自動参加して指定チャンネルを読み上げる（省略時は VC 内チャット）。実行者が閲覧できるチャンネルのみ指定可能 |
 | `!autojoin remove <VC>` / `/autojoin remove <vc>` | サーバー管理 | 自動参加の登録を解除 |
 | `!autojoin list` / `/autojoin list` | サーバー管理 | 自動参加 VC と読み上げ先を一覧表示 |
 | `!ignore add <@user>` / `/ignore add <user>` | サーバー管理 | ユーザーのメッセージを読み上げ対象外にする（入退室アナウンスは対象外にならない） |
@@ -457,7 +457,7 @@ prefix（デフォルト `!`）と スラッシュコマンド（`/`）の両方
 
 | コマンド | 説明 |
 |---|---|
-| `!listen add [#ch]` / `/listen add [ch]` | 読み上げチャンネルを追加（省略時は現在のch）。実行者と VC 内の全員が閲覧できるチャンネルのみ追加可能 |
+| `!listen add [#ch]` / `/listen add [ch]` | 読み上げチャンネルを追加（省略時は現在のch）。実行者と VC 内の全員が閲覧できるチャンネルのみ追加可能（非公開スレッドは不可） |
 | `!listen remove [#ch]` / `/listen remove [ch]` | 読み上げチャンネルから削除 |
 | `!listen list` / `/listen list` | 登録済みチャンネルを一覧表示 |
 

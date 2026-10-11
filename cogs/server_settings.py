@@ -46,7 +46,8 @@ class ServerSettings(GuildOnlyCog):
         # テキストチャンネル未指定時は VC 内チャット（VC と同じ ID）を読み上げる
         text_id = text.id if text else vc.id
         # /listen add と同じく、実行者が閲覧できないチャンネルは読み上げ先にできない
-        error = listen_permission_error(guild, text_id, ctx.author)
+        # （Bot が今いる VC は自動参加先と無関係なため、その VC のメンバーは確認しない）
+        error = listen_permission_error(guild, text_id, ctx.author, check_voice_members=False)
         if error:
             await ctx.send(error, ephemeral=True)
             return

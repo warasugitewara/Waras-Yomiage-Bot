@@ -58,7 +58,7 @@ class _FakeChannel:
 
 def _guild(channel: _FakeChannel | None, members: dict[int, SimpleNamespace]) -> discord.Guild:
     return cast(discord.Guild, SimpleNamespace(
-        get_channel=lambda _cid: channel,
+        get_channel_or_thread=lambda _cid: channel,
         get_member=lambda uid: members.get(uid),
     ))
 
@@ -313,7 +313,7 @@ async def test_autojoin_add_rejects_channel_invisible_to_author(
     guild = SimpleNamespace(
         id=1,
         me=_member(99, bot=True),
-        get_channel=lambda _cid: channel,
+        get_channel_or_thread=lambda _cid: channel,
         get_member=lambda uid: members.get(uid),
     )
     vc = SimpleNamespace(id=20, permissions_for=lambda _m: SimpleNamespace(connect=True, speak=True))
@@ -328,3 +328,136 @@ async def test_autojoin_add_rejects_channel_invisible_to_author(
     ctx = _FakeCtx(guild, _member(1))
     await add(cog, ctx, vc, text)
     assert store.autojoin_all(1) == {20: 10}
+
+
+# ---- コードレビュー（2026-10-11 その2）
+
+
+async def test_hybrid_no_private_message_is_reported_to_user() -> None:
+    """DM でスラッシュ実行した hybrid コマンドは、案内を返し、エラー通知は送らない"""
+    from discord import app_commands
+    from discord.ext import commands
+
+    from bot import YomiageBot
+
+    notified: list[object] = []
+
+    async def notify(*args: object, **_kwargs: object) -> None:
+        notified.append(args)
+
+    bot = cast(YomiageBot, SimpleNamespace(webhook=SimpleNamespace(send=notify)))
+    ctx = _FakeCtx(None, _member(1))
+    error = commands.HybridCommandError(app_commands.NoPrivateMessage())
+    await YomiageBot.on_command_error(bot, cast(commands.Context, ctx), error)
+    assert ctx.sent == ["⛔ このコマンドはサーバー内でのみ使えます。"]
+    assert notified == []
+
+
+def test_listen_accepts_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_channel が引けないスレッドも、閲覧できれば読み上げ対象にできる"""
+    monkeypatch.setattr(discord_helpers, "voice_client_of", lambda _g: None)
+    thread = _FakeChannel({1})
+    guild = cast(discord.Guild, SimpleNamespace(
+        get_channel=lambda _cid: None,
+        get_channel_or_thread=lambda _cid: thread,
+        get_member=lambda uid: {1: _member(1)}.get(uid),
+    ))
+    assert tts_mod._listen_permission_error(guild, 10, _user(1)) is None
+
+
+def test_listen_rejects_private_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    """非公開スレッドは、親チャンネルを閲覧できても招待されていないメンバーがいるため拒否する"""
+    monkeypatch.setattr(discord_helpers, "voice_client_of", lambda _g: None)
+    thread = discord.Thread.__new__(discord.Thread)
+    thread._type = discord.ChannelType.private_thread
+    guild = cast(discord.Guild, SimpleNamespace(
+        get_channel_or_thread=lambda _cid: thread,
+        get_member=lambda uid: {1: _member(1)}.get(uid),
+    ))
+    error = discord_helpers.listen_permission_error(guild, 10, _user(1))
+    assert error is not None and "非公開スレッド" in error
+
+
+def test_listen_permission_can_skip_voice_members(monkeypatch: pytest.MonkeyPatch) -> None:
+    """/autojoin add 用: 接続中の VC のメンバーは確認しない"""
+    members = {1: _member(1), 2: _member(2)}
+    monkeypatch.setattr(
+        discord_helpers, "voice_client_of",
+        lambda _g: SimpleNamespace(channel=SimpleNamespace(members=[_member(2)])),
+    )
+    guild = _guild(_FakeChannel({1}), members)
+    assert discord_helpers.listen_permission_error(guild, 10, _user(1)) is not None
+    assert discord_helpers.listen_permission_error(guild, 10, _user(1), check_voice_members=False) is None
+
+
+async def test_autojoin_add_ignores_members_of_current_vc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from guild_settings import GuildSettingsStore
+
+    # Bot が接続中の別の VC に、読み上げ先を閲覧できないメンバー 2 がいる
+    monkeypatch.setattr(
+        discord_helpers, "voice_client_of",
+        lambda _g: SimpleNamespace(channel=SimpleNamespace(members=[_member(2)])),
+    )
+    store = GuildSettingsStore(tmp_path / "gs.json")
+    cog = ServerSettings(cast("YomiageBot", SimpleNamespace(guild_settings=store)))
+    channel, members = _FakeChannel({1}), {1: _member(1), 2: _member(2)}
+    guild = SimpleNamespace(
+        id=1,
+        me=_member(99, bot=True),
+        get_channel_or_thread=lambda _cid: channel,
+        get_member=lambda uid: members.get(uid),
+    )
+    vc = SimpleNamespace(id=20, permissions_for=lambda _m: SimpleNamespace(connect=True, speak=True))
+    add = cast(Callable[..., Awaitable[None]], ServerSettings.autojoin_add_prefix.callback)
+    await add(cog, _FakeCtx(guild, _member(1)), vc, SimpleNamespace(id=10))
+    assert store.autojoin_all(1) == {20: 10}
+
+
+async def test_myvoice_set_respects_allowed_speakers_when_engine_down() -> None:
+    from bot import YomiageBot
+    from config import load_config
+
+    saved: dict[int, int] = {}
+    bot = SimpleNamespace(
+        word_dict=None,
+        guild_settings=None,
+        user_voice_store=SimpleNamespace(set=lambda uid, sid: saved.__setitem__(uid, sid)),
+    )
+    cog = tts_mod.TTS(cast(YomiageBot, bot))
+    cog._config = load_config({"ALLOWED_SPEAKERS": "3"})
+
+    async def engine_down() -> bool:
+        return False
+
+    cog._ensure_speakers_cache = engine_down  # type: ignore[method-assign]
+    ctx = _FakeCtx(SimpleNamespace(id=1), _member(1))
+    ctx.user = ctx.author  # type: ignore[attr-defined]  # commands.Context ではないため Interaction 側の属性で引かれる
+    await cog._myvoice_set(ctx, 29)
+    assert saved == {} and "存在しません" in ctx.sent[0]
+    await cog._myvoice_set(ctx, 3)
+    assert saved == {1: 3}
+    await cog.cog_unload()
+
+
+async def test_myvoice_info_shows_effective_voice() -> None:
+    """許可外の ID を設定済みなら、実際に使うデフォルトのボイスとそのクレジットを表示する"""
+    from bot import YomiageBot
+    from config import load_config
+
+    bot = SimpleNamespace(
+        word_dict=None,
+        guild_settings=None,
+        user_voice_store=SimpleNamespace(get=lambda _uid: 29),
+    )
+    cog = tts_mod.TTS(cast(YomiageBot, bot))
+    cog._config = load_config({"ALLOWED_SPEAKERS": "3"})
+    cog._speakers_cache = []
+    cog._speaker_id_map = {3: ("ずんだもん", "ノーマル"), 29: ("No.7", "ノーマル")}
+    ctx = _FakeCtx(SimpleNamespace(id=1), _member(1))
+    ctx.user = ctx.author  # type: ignore[attr-defined]  # commands.Context ではないため Interaction 側の属性で引かれる
+    await cog._myvoice_info(ctx)
+    assert "ずんだもん / ノーマル" in ctx.sent[0] and "VOICEVOX:ずんだもん" in ctx.sent[0]
+    assert "No.7" not in ctx.sent[0] and "`29`" in ctx.sent[0]
+    await cog.cog_unload()
