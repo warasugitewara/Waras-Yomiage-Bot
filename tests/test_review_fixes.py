@@ -426,3 +426,25 @@ async def test_myvoice_set_respects_allowed_speakers_when_engine_down() -> None:
     await cog._myvoice_set(ctx, 3)
     assert saved == {1: 3}
     await cog.cog_unload()
+
+
+async def test_myvoice_info_shows_effective_voice() -> None:
+    """許可外の ID を設定済みなら、実際に使うデフォルトのボイスとそのクレジットを表示する"""
+    from bot import YomiageBot
+    from config import load_config
+
+    bot = SimpleNamespace(
+        word_dict=None,
+        guild_settings=None,
+        user_voice_store=SimpleNamespace(get=lambda _uid: 29),
+    )
+    cog = tts_mod.TTS(cast(YomiageBot, bot))
+    cog._config = load_config({"ALLOWED_SPEAKERS": "3"})
+    cog._speakers_cache = []
+    cog._speaker_id_map = {3: ("ずんだもん", "ノーマル"), 29: ("No.7", "ノーマル")}
+    ctx = _FakeCtx(SimpleNamespace(id=1), _member(1))
+    ctx.user = ctx.author  # type: ignore[attr-defined]  # commands.Context ではないため Interaction 側の属性で引かれる
+    await cog._myvoice_info(ctx)
+    assert "ずんだもん / ノーマル" in ctx.sent[0] and "VOICEVOX:ずんだもん" in ctx.sent[0]
+    assert "No.7" not in ctx.sent[0] and "`29`" in ctx.sent[0]
+    await cog.cog_unload()

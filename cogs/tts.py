@@ -389,10 +389,14 @@ class TTS(GuildOnlyCog):
             if isinstance(ctx_or_inter, commands.Context)
             else ctx_or_inter.user.id
         )
-        speaker_id = self.user_voice.get(user_id)
+        # 実際に読み上げに使うボイス（と、そのクレジット）を表示する
+        stored_id = self.user_voice.get(user_id)
+        speaker_id = self._effective_speaker(user_id)
         name = await self._resolve_speaker_name(speaker_id)
         label = f"`{name}`" if name else f"ID `{speaker_id}`"
         msg = f"🎤 現在のボイス: {label} (ID: `{speaker_id}`)"
+        if speaker_id != stored_id:
+            msg += f"\n⚠️ 設定中の ID `{stored_id}` はこのBotでは使用できないため、デフォルトのボイスで読み上げています。"
         credit = await self._resolve_credit(speaker_id)
         if credit:
             msg += f"\n📜 クレジット: `{credit}`"
