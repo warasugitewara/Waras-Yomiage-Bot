@@ -237,9 +237,12 @@ MAX_TEXT_LENGTH=100                  # 最大読み上げ文字数
 # UPTIME_KUMA_PUSH_URL=https://your-uptime-kuma/api/push/TOKEN?status=up&msg=OK&ping=  # Uptime Kuma 死活監視（任意）
 # CUSTOM_URL_LABELS=example.com=例のURL  # 独自ドメインの URL の読み上げ方（カンマ区切りで複数可）（任意）
 # ALLOWED_SPEAKERS=3,46,89            # 使用を許可するスピーカーID（カンマ区切り。未設定なら全員）（任意）
+# VOICEVOX_FALLBACK_URL=http://localhost:50022  # 予備の VOICEVOX ENGINE（CPU 版など）の URL（任意）
 ```
 
-> ℹ️ 設定値は起動時にまとめて検証します。範囲外の値（例: `DEFAULT_SPEED=3`）や形式の誤り（例: `OWNER_IDS` に数字以外）があると、原因の変数名を表示して起動を中止します。
+> ℹ️ 設定値は起動時にまとめて検証します。
+
+> ℹ️ **合成に失敗したとき:** 読み上げは「`VOICEVOX_URL` で指定の声 → `VOICEVOX_FALLBACK_URL` で指定の声 → `VOICEVOX_URL` で `DEFAULT_SPEAKER` の声」の順に試します。GPU の VRAM 不足などで ENGINE が 5xx を返した声は、10 分間 `VOICEVOX_FALLBACK_URL` へ直接送ります。`VOICEVOX_FALLBACK_URL` が未設定なら 2 番目を飛ばします。ENGINE の 5xx は再試行しません（接続エラーとタイムアウトは従来どおり再試行します）。範囲外の値（例: `DEFAULT_SPEED=3`）や形式の誤り（例: `OWNER_IDS` に数字以外）があると、原因の変数名を表示して起動を中止します。
 
 <details>
 <summary>主要なスピーカーID例（クリックで展開）</summary>
@@ -647,7 +650,7 @@ unit ファイルの定義は、[Proxmox LXC 環境構築](#proxmox-setup) の�
 - `ERROR_WEBHOOK_URL` を設定した場合、エラー通知にサーバー名・ユーザー名・コマンド名・サーバーID・チャンネルID・エラーのトレースバックが含まれ、指定した Webhook に送信されます。
 - 各 `data/*.json` には直近3世代のバックアップ（`.bak1`〜`.bak3`）が作成されます。削除後も、バックアップは次の保存で順に上書きされるまで残ります。
 - 保存データは Bot を運用するホスト内にのみ保持され、第三者へ提供しません。
-- **VOICEVOX ENGINE の場所:** 読み上げるテキストは `VOICEVOX_URL` の ENGINE に送信されます。ENGINE を別のホストで動かす場合は、そのホストにもメッセージ本文が届きます。`http://` で接続するのは同じホストか信頼できるプライベートネットワーク内に限り、それ以外では `https://`（リバースプロキシ等）を使用してください。
+- **VOICEVOX ENGINE の場所:** 読み上げるテキストは `VOICEVOX_URL` の ENGINE（設定していれば `VOICEVOX_FALLBACK_URL` の ENGINE にも）に送信されます。ENGINE を別のホストで動かす場合は、そのホストにもメッセージ本文が届きます。`http://` で接続するのは同じホストか信頼できるプライベートネットワーク内に限り、それ以外では `https://`（リバースプロキシ等）を使用してください。
 
 ---
 

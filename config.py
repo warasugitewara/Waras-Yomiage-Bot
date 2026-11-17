@@ -23,6 +23,8 @@ class Config:
     discord_token: str | None = field(default=None, repr=False)
     prefix: str = "!"
     voicevox_url: str = "http://localhost:50021"
+    # 主 ENGINE で合成できないときに使う予備 ENGINE（CPU 版など）。None は使わない
+    voicevox_fallback_url: str | None = None
     default_speaker: int = 3
     default_speed: float = 1.0
     max_text_length: int = 100
@@ -142,6 +144,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         discord_token=_get(env, "DISCORD_TOKEN"),
         prefix=_get(env, "PREFIX") or "!",
         voicevox_url=_get(env, "VOICEVOX_URL") or "http://localhost:50021",
+        voicevox_fallback_url=_get(env, "VOICEVOX_FALLBACK_URL"),
         default_speaker=default_speaker,
         default_speed=_float(env, "DEFAULT_SPEED", 1.0, minimum=0.5, maximum=2.0),
         max_text_length=_int(env, "MAX_TEXT_LENGTH", 100, minimum=1, maximum=2000),

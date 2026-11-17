@@ -10,6 +10,14 @@ class VoicevoxError(Exception):
     pass
 
 
+class VoicevoxEngineError(VoicevoxError):
+    """ENGINE が 5xx を返した（推論失敗・モデル読み込み失敗など、ENGINE 側の処理エラー）。
+
+    接続エラーやタイムアウトと違い、同じ ENGINE に再送しても失敗し続けることが多い
+    （例: GPU の VRAM 不足で特定の声のモデルを読み込めない）。
+    """
+
+
 class VoicevoxClient:
     def __init__(
         self,
@@ -39,6 +47,7 @@ class VoicevoxClient:
         *,
         timeout: float,
         retry_on_timeout: bool = True,
+        retry_on_server_error: bool = True,
         max_retries: int | None = None,
         **kwargs,
     ) -> bytes:
@@ -47,6 +56,8 @@ class VoicevoxClient:
         LXC↔VM 間の瞬断や 5xx を吸収するため、接続エラー・サーバエラーは
         指数バックオフで最大 max_retries 回まで再試行する。タイムアウトは
         retry_on_timeout=False の呼び出し（長い synthesis 等）では再試行しない。
+        5xx は retry_on_server_error=False の呼び出し（合成）では再試行せず、
+        すぐに VoicevoxEngineError を送出して呼び出し側のフォールバックに任せる。
         max_retries を明示すればインスタンス既定値を上書きする（health 用の
         死活確認など、待たせたくない呼び出しで 0 を渡す）。
         失敗時は VoicevoxError を送出する。
@@ -61,11 +72,13 @@ class VoicevoxClient:
             try:
                 async with session.request(method, url, timeout=to, **kwargs) as resp:
                     if resp.status != 200:
-                        # 5xx は一時的とみなして再試行、それ以外は即エラー
-                        if resp.status >= 500 and attempt < retries:
-                            last_exc = VoicevoxError(f"{path} failed: HTTP {resp.status}")
-                            await asyncio.sleep(self._retry_backoff * (2 ** attempt))
-                            continue
+                        if resp.status >= 500:
+                            # 5xx は一時的とみなして再試行（合成では再試行しない）
+                            if retry_on_server_error and attempt < retries:
+                                last_exc = VoicevoxEngineError(f"{path} failed: HTTP {resp.status}")
+                                await asyncio.sleep(self._retry_backoff * (2 ** attempt))
+                                continue
+                            raise VoicevoxEngineError(f"{path} failed: HTTP {resp.status}")
                         raise VoicevoxError(f"{path} failed: HTTP {resp.status}")
                     return await resp.read()
             except TimeoutError as e:
@@ -89,13 +102,18 @@ class VoicevoxClient:
         raise VoicevoxError(f"VOICEVOX request failed: {last_exc}")
 
     async def synthesis(self, text: str, speaker: int, speed: float = 1.0) -> bytes:
-        """テキストを音声合成して WAV の bytes を返す"""
+        """テキストを音声合成して WAV の bytes を返す。
+
+        ENGINE の 5xx は再試行せず VoicevoxEngineError を送出する（モデルを読み込めない声は
+        再送しても失敗し続け、合成枠を塞いで他の読み上げまで遅らせるため）。
+        """
         # Step 1: audio_query（短時間・タイムアウトも再試行）
         raw = await self._request(
             "POST",
             "/audio_query",
             params={"text": text, "speaker": speaker},
             timeout=10,
+            retry_on_server_error=False,
         )
         try:
             query = json.loads(raw)
@@ -116,6 +134,7 @@ class VoicevoxClient:
             json=query,
             timeout=30,
             retry_on_timeout=False,
+            retry_on_server_error=False,
         )
 
     async def get_speakers(self) -> list[dict]:

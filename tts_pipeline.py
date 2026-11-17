@@ -7,14 +7,16 @@
 import asyncio
 import collections
 import io
+import time
 import wave
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import discord
 
 from discord_helpers import voice_client_of
-from voicevox import VoicevoxClient, VoicevoxError
+from voicevox import VoicevoxEngineError, VoicevoxError
 
 if TYPE_CHECKING:
     from bot import YomiageBot
@@ -25,12 +27,27 @@ PCM_CACHE_MAX_BYTES = 64 * 1024 * 1024
 
 # VOICEVOX への同時合成リクエスト数（ギルド数が増えてもエンジン VM を過負荷にしない）
 SYNTH_CONCURRENCY = 2
+# 予備 ENGINE（CPU 版）への同時合成リクエスト数（CPU 合成は遅く、並べても速くならない）
+FALLBACK_SYNTH_CONCURRENCY = 1
+
+# 主 ENGINE で 5xx になった声を、予備 ENGINE へ直接回す時間（秒）。
+# 主 ENGINE で失敗するのを毎回待たないため。期限が切れたら主 ENGINE を再び試す
+PRIMARY_AVOID_SECONDS = 600.0
 
 # ギルドごとのキュー長（メッセージは満杯なら最古を捨てる。PCM は2件まで先読み）
 _MESSAGE_QUEUE_MAX = 50
 _PCM_QUEUE_MAX = 2
 
 CacheKey = tuple[str, int, float]
+
+# フォールバックの通知先（タイトル, 本文）
+FallbackNotifier = Callable[[str, str], Awaitable[None]]
+
+
+class SynthesisEngine(Protocol):
+    """合成に使う ENGINE（VoicevoxClient が満たす）"""
+
+    async def synthesis(self, text: str, speaker: int, speed: float = 1.0) -> bytes: ...
 
 
 @dataclass
@@ -91,10 +108,28 @@ async def wav_to_pcm(wav_bytes: bytes) -> bytes:
 
 
 class SpeechSynthesizer:
-    """テキストを Discord 再生用 PCM に変換する（キャッシュ・合成共有つき、ギルド横断で1つ）"""
+    """テキストを Discord 再生用 PCM に変換する（キャッシュ・合成共有つき、ギルド横断で1つ）
 
-    def __init__(self, voicevox: VoicevoxClient):
+    合成は次の順に試す（fallback 未設定なら 2 を飛ばす）:
+      1. 主 ENGINE（GPU）で指定の声
+      2. 予備 ENGINE（CPU）で指定の声
+      3. 主 ENGINE で既定の声（default_speaker）
+    3 で読んだ音声は指定の声の結果ではないため、キャッシュしない。
+    """
+
+    def __init__(
+        self,
+        voicevox: SynthesisEngine,
+        fallback: SynthesisEngine | None = None,
+        default_speaker: int | None = None,
+        notify: FallbackNotifier | None = None,
+    ):
         self.voicevox = voicevox
+        self.fallback = fallback
+        self.default_speaker = default_speaker
+        self._notify = notify
+        # speaker_id → 主 ENGINE を避ける期限（time.monotonic()）
+        self._primary_avoid_until: dict[int, float] = {}
 
         # PCM LRU キャッシュ (text, speaker_id, speed) → 48kHz stereo s16le bytes
         # キャッシュヒット時は VOICEVOX 合成・変換のいずれも省略
@@ -107,6 +142,7 @@ class SpeechSynthesizer:
         # キャンセルされても合成は継続し、他ギルドの待機が停止しない
         self.in_flight: dict[CacheKey, asyncio.Task[bytes]] = {}
         self._sem = asyncio.Semaphore(SYNTH_CONCURRENCY)
+        self._fallback_sem = asyncio.Semaphore(FALLBACK_SYNTH_CONCURRENCY)
 
     def cached(self, key: CacheKey) -> bytes | None:
         """キャッシュにあれば返し、LRU の最新に移す（await を挟まないので安全）"""
@@ -143,12 +179,79 @@ class SpeechSynthesizer:
 
     async def _synthesize(self, item: TTSItem) -> bytes:
         """VOICEVOX 合成 → PCM 変換し、キャッシュへ保存して返す"""
-        async with self._sem:
-            wav_bytes = await self.voicevox.synthesis(item.text, item.speaker_id, item.speed)
+        wav_bytes, exact = await self._synthesize_wav(item)
         pcm_bytes = await wav_to_pcm(wav_bytes)
-        # キャッシュ更新（VC切断に関わらず次回のために保存）
-        self.cache_put(item.cache_key, pcm_bytes)
+        # キャッシュ更新（VC切断に関わらず次回のために保存）。既定の声で代わりに読んだ音声は
+        # 保存しない（保存すると、その文がキャッシュから消えるまで既定の声のままになる）
+        if exact:
+            self.cache_put(item.cache_key, pcm_bytes)
         return pcm_bytes
+
+    def _primary_avoided(self, speaker_id: int) -> bool:
+        until = self._primary_avoid_until.get(speaker_id)
+        if until is None:
+            return False
+        if time.monotonic() >= until:
+            del self._primary_avoid_until[speaker_id]
+            return False
+        return True
+
+    async def _synthesize_wav(self, item: TTSItem) -> tuple[bytes, bool]:
+        """フォールバック順に合成し、(WAV, 指定の声で合成できたか) を返す。
+        すべて失敗したら最後のエラーを送出する。
+        """
+        speaker = item.speaker_id
+        errors: list[str] = []
+        # 主 ENGINE が接続エラー・タイムアウトなら、既定の声で再試行しても無駄なので飛ばす
+        primary_reachable = True
+
+        if self.fallback is None or not self._primary_avoided(speaker):
+            try:
+                async with self._sem:
+                    return await self.voicevox.synthesis(item.text, speaker, item.speed), True
+            except VoicevoxEngineError as e:
+                errors.append(f"主 ENGINE: {e}")
+                if self.fallback is not None:
+                    self._primary_avoid_until[speaker] = time.monotonic() + PRIMARY_AVOID_SECONDS
+                    await self._report(
+                        "VOICEVOX 主 ENGINE で合成失敗",
+                        f"speaker={speaker} を {int(PRIMARY_AVOID_SECONDS // 60)} 分間 予備 ENGINE で合成します: {e}",
+                    )
+            except VoicevoxError as e:
+                errors.append(f"主 ENGINE: {e}")
+                primary_reachable = False
+
+        if self.fallback is not None:
+            try:
+                async with self._fallback_sem:
+                    return await self.fallback.synthesis(item.text, speaker, item.speed), True
+            except VoicevoxError as e:
+                errors.append(f"予備 ENGINE: {e}")
+
+        default = self.default_speaker
+        if default is not None and default != speaker and primary_reachable:
+            try:
+                async with self._sem:
+                    wav = await self.voicevox.synthesis(item.text, default, item.speed)
+            except VoicevoxError as e:
+                errors.append(f"既定の声: {e}")
+            else:
+                await self._report(
+                    "VOICEVOX 既定の声で代替",
+                    f"speaker={speaker} を合成できず、既定の声（speaker={default}）で読みました: "
+                    + " / ".join(errors),
+                )
+                return wav, False
+
+        raise VoicevoxError(" / ".join(errors) or "VOICEVOX 合成に失敗しました")
+
+    async def _report(self, title: str, description: str) -> None:
+        print(f"[VOICEVOX FALLBACK] {title}: {description}")
+        if self._notify is not None:
+            try:
+                await self._notify(title, description)
+            except Exception as e:  # 通知の失敗で読み上げを止めない
+                print(f"[VOICEVOX FALLBACK] 通知に失敗: {e}")
 
     def cache_put(self, key: CacheKey, pcm: bytes) -> None:
         """PCM を LRU キャッシュに保存し、件数・合計バイト数の上限まで古い順に破棄する"""

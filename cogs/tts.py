@@ -43,6 +43,9 @@ class TTS(GuildOnlyCog):
         self.bot = bot
         config = get_config()
         self.voicevox = VoicevoxClient(config.voicevox_url)
+        self.voicevox_fallback = (
+            VoicevoxClient(config.voicevox_fallback_url) if config.voicevox_fallback_url else None
+        )
         self.channel_store = ChannelStore()
         # 辞書・サーバー設定は Dictionary / ServerSettings Cog と共有するため bot 側で管理
         self.word_dict = bot.word_dict
@@ -57,7 +60,12 @@ class TTS(GuildOnlyCog):
         self.user_voice = bot.user_voice_store
 
         # 合成（キャッシュ・合成共有、ギルド横断）と、ギルドごとの再生キュー・ワーカー
-        self.synthesizer = SpeechSynthesizer(self.voicevox)
+        self.synthesizer = SpeechSynthesizer(
+            self.voicevox,
+            fallback=self.voicevox_fallback,
+            default_speaker=config.default_speaker,
+            notify=self._notify_fallback,
+        )
         self.playback = PlaybackManager(bot, self.synthesizer)
 
         # guild_id → speed(float)
@@ -105,6 +113,12 @@ class TTS(GuildOnlyCog):
 
         # 4. VoicevoxClient セッションをクローズ（タスク終了後）
         await self.voicevox.close()
+        if self.voicevox_fallback is not None:
+            await self.voicevox_fallback.close()
+
+    async def _notify_fallback(self, title: str, description: str) -> None:
+        """合成のフォールバックを Webhook に通知する（同じタイトルはクールダウンで間引かれる）"""
+        await self.bot.webhook.send("warning", title, description)
 
     async def _warmup(self):
         """起動後に短文を事前合成してキャッシュ & VOICEVOXエンジンのモデルをウォームアップする"""
