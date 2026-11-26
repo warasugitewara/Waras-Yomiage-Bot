@@ -415,6 +415,9 @@ class PlaybackManager:
                     await event.wait()
                     if play_error[0]:
                         raise play_error[0]
+                elif vc is not None:
+                    # VoiceClient は残っているが音声接続が切れている（discord.py が再接続中など）
+                    print(f"[PLAYER] 音声接続が切れているため再生をスキップしました（guild={guild_id}）")
             except Exception as e:
                 print(f"[PLAYER ERROR] {e}")
                 await self.bot.webhook.send(

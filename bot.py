@@ -237,6 +237,10 @@ async def main():
     if not token:
         raise ValueError(".env に DISCORD_TOKEN が設定されていません。")
 
+    # bot.run() と同じく discord.py のログ（INFO 以上）を出す。bot.start() では自動で設定されないため、
+    # 音声の切断・再接続などのログが出ず、読み上げが止まったときに原因を追えない
+    discord.utils.setup_logging(root=False)
+
     bot = YomiageBot()
     try:
         async with bot:
