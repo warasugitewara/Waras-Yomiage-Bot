@@ -231,7 +231,7 @@ def _fake_voice_client_args(removed: list[int]) -> tuple[discord.Client, discord
 
 
 async def test_voice_client_cleanup_resets_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    """切断が確定したとき（VoiceClient.cleanup）にだけ後片付けする。unload 後は何もしない"""
+    """切断が確定したとき（VoiceClient.cleanup）に後片付けする。接続前・unload 後は何もしない"""
     from bot import YomiageBot
 
     bot = SimpleNamespace(user_voice_store=SimpleNamespace(get=lambda _uid: 3), word_dict=None, guild_settings=None)
@@ -240,14 +240,42 @@ async def test_voice_client_cleanup_resets_session(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(cog, "_reset_guild_session", reset.append)
     removed: list[int] = []
 
-    vc = cog._voice_client_factory(*_fake_voice_client_args(removed))
-    assert isinstance(vc, discord.VoiceClient)
+    # 最初の接続に失敗したときの cleanup（on_cleanup 未設定）では後片付けしない
+    tts_mod._TrackedVoiceClient(*_fake_voice_client_args(removed)).cleanup()
+    assert removed == [1] and reset == []
+
+    vc = tts_mod._TrackedVoiceClient(*_fake_voice_client_args(removed))
+    vc.on_cleanup = cog._on_voice_cleanup
     vc.cleanup()
-    assert removed == [1] and reset == [1]
+    assert reset == [1]
 
     await cog.cog_unload()
-    cog._voice_client_factory(*_fake_voice_client_args(removed)).cleanup()
+    vc.cleanup()
     assert reset == [1]
+
+
+async def test_failed_join_keeps_listen_channels(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """/join の接続がタイムアウトしても、事前に /listen add したチャンネルを消さない"""
+    import channel_store
+    from bot import YomiageBot
+
+    monkeypatch.setattr(channel_store, "_CHANNELS_FILE", tmp_path / "channels.json")
+    bot = SimpleNamespace(user_voice_store=SimpleNamespace(get=lambda _uid: 3), word_dict=None, guild_settings=None)
+    cog = tts_mod.TTS(cast(YomiageBot, bot))
+    cog.channel_store.add(1, 100)
+    voice_channel = SimpleNamespace(guild=SimpleNamespace(id=1))
+
+    async def connect(*, self_deaf: bool, cls: type[tts_mod._TrackedVoiceClient]) -> object:
+        # discord.py の Connectable.connect と同じく、タイムアウト時は cleanup してから送出する
+        cls(*_fake_voice_client_args([])).cleanup()
+        raise TimeoutError
+
+    voice_channel.connect = connect  # type: ignore[attr-defined]
+    monkeypatch.setattr(tts_mod, "_voice_client", lambda _g: None)
+    with pytest.raises(TimeoutError):
+        await cog._join_vc(cast(discord.VoiceChannel, voice_channel))
+    assert cog.channel_store.is_watched(1, 100)
+    await cog.cog_unload()
 
 
 async def test_join_reconnects_dead_voice_client(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -270,7 +298,7 @@ async def test_join_reconnects_dead_voice_client(monkeypatch: pytest.MonkeyPatch
 
     async def connect(*, self_deaf: bool, cls: object) -> object:
         calls.append("connect")
-        assert self_deaf and cls == cog._voice_client_factory
+        assert self_deaf and cls is tts_mod._TrackedVoiceClient
         return fresh
 
     voice_channel.connect = connect  # type: ignore[attr-defined]
@@ -278,6 +306,8 @@ async def test_join_reconnects_dead_voice_client(monkeypatch: pytest.MonkeyPatch
     vc, joined = await cog._join_vc(cast(discord.VoiceChannel, voice_channel))
     assert calls == ["disconnect(force=False)", "connect"]
     assert vc is fresh and joined
+    # 接続に成功したので、切断が確定したら後片付けする
+    assert fresh.on_cleanup == cog._on_voice_cleanup  # type: ignore[attr-defined]
     await cog.cog_unload()
 
 

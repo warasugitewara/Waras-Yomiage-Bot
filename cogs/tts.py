@@ -46,6 +46,9 @@ class _TrackedVoiceClient(discord.VoiceClient):
     → 再接続）。このとき Bot 自身の on_voice_state_update にも「VC から抜けた」が届くため、
     それを切断とみなすと再接続のたびに読み上げチャンネルが消えてしまう。cleanup は
     切断が確定したとき（/leave・管理者による切断・再接続の断念）にだけ呼ばれる。
+
+    on_cleanup は接続に成功してから設定する。最初の接続がタイムアウトしたときも discord.py は
+    cleanup を呼ぶため、事前に /listen add した読み上げチャンネルまで消してしまわないようにする。
     """
 
     on_cleanup: Callable[[int], None] | None = None
@@ -166,12 +169,6 @@ class TTS(GuildOnlyCog):
         self._last_author.pop(guild_id, None)
         self.playback.stop(guild_id)
 
-    def _voice_client_factory(self, client: discord.Client, channel: discord.abc.Connectable) -> _TrackedVoiceClient:
-        """connect(cls=...) 用。切断が確定したら _on_voice_cleanup が呼ばれる VoiceClient を作る"""
-        vc = _TrackedVoiceClient(client, channel)
-        vc.on_cleanup = self._on_voice_cleanup
-        return vc
-
     def _on_voice_cleanup(self, guild_id: int) -> None:
         """VC からの切断が確定したときの後片付け（/leave 以外の切断も含む）"""
         if self._unloaded:
@@ -233,7 +230,10 @@ class TTS(GuildOnlyCog):
                 return vc, False
             await vc.move_to(voice_channel)
         else:
-            vc = await voice_channel.connect(self_deaf=True, cls=self._voice_client_factory)
+            tracked = await voice_channel.connect(self_deaf=True, cls=_TrackedVoiceClient)
+            # 接続に成功してから設定する（失敗時の cleanup では後片付けしない）
+            tracked.on_cleanup = self._on_voice_cleanup
+            vc = tracked
 
         self.playback.ensure_workers(guild_id)
         return vc, True
