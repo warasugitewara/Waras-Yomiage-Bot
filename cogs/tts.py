@@ -1,6 +1,7 @@
 """TTS Cog — 読み上げ機能の全コマンドとイベントハンドラ（合成・再生は tts_pipeline）"""
 
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import discord
@@ -36,6 +37,26 @@ _CREDIT_OVERRIDES = {
 def credit_for(character: str) -> str:
     """キャラクター名から VOICEVOX のクレジット表記を返す"""
     return _CREDIT_OVERRIDES.get(character, f"VOICEVOX:{character}")
+
+
+class _TrackedVoiceClient(discord.VoiceClient):
+    """接続を最終的に片付けたとき（cleanup）だけ on_cleanup を呼ぶ VoiceClient。
+
+    discord.py は音声接続が切れると、いったん VC から抜けて入り直す（disconnect(cleanup=False)
+    → 再接続）。このとき Bot 自身の on_voice_state_update にも「VC から抜けた」が届くため、
+    それを切断とみなすと再接続のたびに読み上げチャンネルが消えてしまう。cleanup は
+    切断が確定したとき（/leave・管理者による切断・再接続の断念）にだけ呼ばれる。
+
+    on_cleanup は接続に成功してから設定する。最初の接続がタイムアウトしたときも discord.py は
+    cleanup を呼ぶため、事前に /listen add した読み上げチャンネルまで消してしまわないようにする。
+    """
+
+    on_cleanup: Callable[[int], None] | None = None
+
+    def cleanup(self) -> None:
+        super().cleanup()
+        if self.on_cleanup is not None:
+            self.on_cleanup(self.guild.id)
 
 
 class TTS(GuildOnlyCog):
@@ -88,12 +109,16 @@ class TTS(GuildOnlyCog):
         # ウォームアップ Task の参照（GC による途中消失を防ぎ、unload 時にキャンセルする）
         self._warmup_task: asyncio.Task[None] | None = None
 
+        # unload 後（シャットダウン時の VC 切断など）は VoiceClient の cleanup で状態を触らない
+        self._unloaded = False
+
     async def cog_load(self):
         """Cog 読み込み完了後にウォームアップタスクを起動する"""
         self._warmup_task = asyncio.create_task(self._warmup(), name="voicevox-warmup")
 
     async def cog_unload(self):
         """シャットダウン: タスクキャンセル → gather → in_flight クリア → セッションクローズ"""
+        self._unloaded = True
         # 1. 全タスクをキャンセル
         tasks: list[asyncio.Task] = list(self.playback.cancel_all())
         for task in self._auto_leave_tasks.values():
@@ -144,6 +169,15 @@ class TTS(GuildOnlyCog):
         self._last_author.pop(guild_id, None)
         self.playback.stop(guild_id)
 
+    def _on_voice_cleanup(self, guild_id: int) -> None:
+        """VC からの切断が確定したときの後片付け（/leave 以外の切断も含む）"""
+        if self._unloaded:
+            return
+        try:
+            self._reset_guild_session(guild_id)
+        except Exception as e:  # discord.py の切断処理を止めない
+            print(f"[VOICE CLEANUP ERROR] {e}")
+
     def _cancel_auto_leave(self, guild_id: int):
         """スケジュール済みの自動退出タスクをキャンセルする"""
         task = self._auto_leave_tasks.pop(guild_id, None)
@@ -185,12 +219,21 @@ class TTS(GuildOnlyCog):
         guild_id = voice_channel.guild.id
         vc = _voice_client(voice_channel.guild)
 
+        if vc is not None and not vc.is_connected():
+            # 再接続に失敗したまま VoiceClient だけ残っていると音声を送れない。
+            # /leave → /join と同じく、いったん切ってからつなぎ直す
+            await vc.disconnect()
+            vc = None
+
         if vc is not None:
             if vc.channel == voice_channel:
                 return vc, False
             await vc.move_to(voice_channel)
         else:
-            vc = await voice_channel.connect(self_deaf=True)
+            tracked = await voice_channel.connect(self_deaf=True, cls=_TrackedVoiceClient)
+            # 接続に成功してから設定する（失敗時の cleanup では後片付けしない）
+            tracked.on_cleanup = self._on_voice_cleanup
+            vc = tracked
 
         self.playback.ensure_workers(guild_id)
         return vc, True
@@ -511,11 +554,7 @@ class TTS(GuildOnlyCog):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ):
-        if self.bot.user is not None and member.id == self.bot.user.id:
-            # 管理者による切断など、/leave 以外で Bot が VC から外れた場合も状態を片付ける
-            if before.channel is not None and after.channel is None:
-                self._reset_guild_session(member.guild.id)
-            return
+        # Bot 自身の切断は _TrackedVoiceClient.cleanup で片付ける（再接続中の一時的な退出と区別するため）
         if member.bot:
             return
         guild = member.guild

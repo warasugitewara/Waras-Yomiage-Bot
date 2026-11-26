@@ -190,19 +190,23 @@ def test_custom_url_labels() -> None:
 # ---- R-8: Bot が外部から切断されたら状態を片付ける
 
 
-async def test_bot_disconnect_resets_session(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_internal_voice_reconnect_keeps_listen_channels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """discord.py の内部再接続（VC から抜けて入り直す）で読み上げチャンネルを消さない"""
+    import channel_store
     from bot import YomiageBot
 
+    monkeypatch.setattr(channel_store, "_CHANNELS_FILE", tmp_path / "channels.json")
     bot = SimpleNamespace(
         user_voice_store=SimpleNamespace(get=lambda _uid: 3), user=SimpleNamespace(id=999),
         word_dict=None, guild_settings=None,
     )
     cog = tts_mod.TTS(cast(YomiageBot, bot))
-    reset: list[int] = []
-    monkeypatch.setattr(cog, "_reset_guild_session", reset.append)
+    cog.channel_store.add(1, 100)
 
-    def event(member_id: int, before: object, after: object):
-        member = SimpleNamespace(id=member_id, bot=True, guild=SimpleNamespace(id=1))
+    def event(before: object, after: object):
+        member = SimpleNamespace(id=999, bot=True, guild=SimpleNamespace(id=1))
         return (
             cast(discord.Member, member),
             cast(discord.VoiceState, SimpleNamespace(channel=before)),
@@ -210,11 +214,100 @@ async def test_bot_disconnect_resets_session(monkeypatch: pytest.MonkeyPatch) ->
         )
 
     vc = SimpleNamespace(id=10)
-    await cog.on_voice_state_update(*event(999, vc, SimpleNamespace(id=11)))  # 移動は対象外
-    await cog.on_voice_state_update(*event(500, vc, None))  # 他の Bot は対象外
-    assert reset == []
-    await cog.on_voice_state_update(*event(999, vc, None))
+    await cog.on_voice_state_update(*event(vc, None))  # _voice_disconnect() による一時的な退出
+    await cog.on_voice_state_update(*event(None, vc))  # 同じ VC に入り直す
+    assert cog.channel_store.is_watched(1, 100)
+    await cog.cog_unload()
+
+
+def _fake_voice_client_args(removed: list[int]) -> tuple[discord.Client, discord.abc.Connectable]:
+    import asyncio
+
+    client = SimpleNamespace(_connection=SimpleNamespace(
+        loop=asyncio.get_running_loop(), _remove_voice_client=removed.append,
+    ))
+    channel = SimpleNamespace(guild=SimpleNamespace(id=1), _get_voice_client_key=lambda: (1, "guild_id"))
+    return cast(discord.Client, client), cast(discord.abc.Connectable, channel)
+
+
+async def test_voice_client_cleanup_resets_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """切断が確定したとき（VoiceClient.cleanup）に後片付けする。接続前・unload 後は何もしない"""
+    from bot import YomiageBot
+
+    bot = SimpleNamespace(user_voice_store=SimpleNamespace(get=lambda _uid: 3), word_dict=None, guild_settings=None)
+    cog = tts_mod.TTS(cast(YomiageBot, bot))
+    reset: list[int] = []
+    monkeypatch.setattr(cog, "_reset_guild_session", reset.append)
+    removed: list[int] = []
+
+    # 最初の接続に失敗したときの cleanup（on_cleanup 未設定）では後片付けしない
+    tts_mod._TrackedVoiceClient(*_fake_voice_client_args(removed)).cleanup()
+    assert removed == [1] and reset == []
+
+    vc = tts_mod._TrackedVoiceClient(*_fake_voice_client_args(removed))
+    vc.on_cleanup = cog._on_voice_cleanup
+    vc.cleanup()
     assert reset == [1]
+
+    await cog.cog_unload()
+    vc.cleanup()
+    assert reset == [1]
+
+
+async def test_failed_join_keeps_listen_channels(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """/join の接続がタイムアウトしても、事前に /listen add したチャンネルを消さない"""
+    import channel_store
+    from bot import YomiageBot
+
+    monkeypatch.setattr(channel_store, "_CHANNELS_FILE", tmp_path / "channels.json")
+    bot = SimpleNamespace(user_voice_store=SimpleNamespace(get=lambda _uid: 3), word_dict=None, guild_settings=None)
+    cog = tts_mod.TTS(cast(YomiageBot, bot))
+    cog.channel_store.add(1, 100)
+    voice_channel = SimpleNamespace(guild=SimpleNamespace(id=1))
+
+    async def connect(*, self_deaf: bool, cls: type[tts_mod._TrackedVoiceClient]) -> object:
+        # discord.py の Connectable.connect と同じく、タイムアウト時は cleanup してから送出する
+        cls(*_fake_voice_client_args([])).cleanup()
+        raise TimeoutError
+
+    voice_channel.connect = connect  # type: ignore[attr-defined]
+    monkeypatch.setattr(tts_mod, "_voice_client", lambda _g: None)
+    with pytest.raises(TimeoutError):
+        await cog._join_vc(cast(discord.VoiceChannel, voice_channel))
+    assert cog.channel_store.is_watched(1, 100)
+    await cog.cog_unload()
+
+
+async def test_join_reconnects_dead_voice_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """音声接続が切れたまま VoiceClient が残っていたら、/join でつなぎ直す"""
+    from bot import YomiageBot
+
+    bot = SimpleNamespace(
+        user_voice_store=SimpleNamespace(get=lambda _uid: 3), word_dict=None, guild_settings=None,
+        get_guild=lambda _gid: None,
+    )
+    cog = tts_mod.TTS(cast(YomiageBot, bot))
+    calls: list[str] = []
+    voice_channel = SimpleNamespace(guild=SimpleNamespace(id=1))
+
+    async def disconnect(*, force: bool = False) -> None:
+        calls.append(f"disconnect(force={force})")
+
+    stale = SimpleNamespace(is_connected=lambda: False, channel=voice_channel, disconnect=disconnect)
+    fresh = SimpleNamespace(is_connected=lambda: True, channel=voice_channel)
+
+    async def connect(*, self_deaf: bool, cls: object) -> object:
+        calls.append("connect")
+        assert self_deaf and cls is tts_mod._TrackedVoiceClient
+        return fresh
+
+    voice_channel.connect = connect  # type: ignore[attr-defined]
+    monkeypatch.setattr(tts_mod, "_voice_client", lambda _g: stale)
+    vc, joined = await cog._join_vc(cast(discord.VoiceChannel, voice_channel))
+    assert calls == ["disconnect(force=False)", "connect"]
+    assert vc is fresh and joined
+    # 接続に成功したので、切断が確定したら後片付けする
+    assert fresh.on_cleanup == cog._on_voice_cleanup  # type: ignore[attr-defined]
     await cog.cog_unload()
 
 
